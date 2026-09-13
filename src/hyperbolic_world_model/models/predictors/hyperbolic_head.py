@@ -1,35 +1,29 @@
-"""Hyperbolic predictor head: dynamics as tangent-space updates on a curved manifold.
+"""Hyperbolic predictor head: dynamics as geodesic steps on a curved manifold.
 
-Given a manifold point ``s_t`` and action ``a_t``:
+Given a manifold point ``s_t`` and action ``a_t`` (shared architecture in ``base.py``):
 
-1. read the state in tangent coordinates at the origin, ``v = logmap0(s_t)`` (Euclidean vector),
-2. let an MLP propose a tangent update ``u_0 = MLP([v, a_t])`` at the origin,
-3. parallel-transport ``u_0`` to ``s_t`` and follow the geodesic: ``s_{t+1} = expmap(s_t, ptransp(0, s_t, u_0))``.
+1. read the state in tangent coordinates at the origin, ``v = logmap0(s_t)``,
+2. embed the action and concatenate, ``[v, phi(a_t)]``,
+3. let the fusion MLP propose a bounded tangent update ``delta`` at the origin,
+4. parallel-transport ``delta`` to ``s_t`` and follow the geodesic:
+   ``s_{t+1} = proj(expmap(s_t, P_{0->s_t} delta))``,
+5. retract to ``max_radius`` if the step left the numerically reliable region (shared guard).
 
 The loss is the squared geodesic distance ``manifold.sqdist``. The head works for **any**
 ``Manifold``; with ``Euclidean`` it reduces exactly to :class:`EuclideanHead`, which
-``tests/test_smoke_experiment.py`` relies on.
+``tests/models/test_predictor_heads.py`` asserts.
 """
 
 from __future__ import annotations
 
-import torch
 from torch import Tensor
 
 from hyperbolic_world_model.geometry.base import Manifold
-from hyperbolic_world_model.geometry.utils import clip_norm
 from hyperbolic_world_model.models.predictors.base import ActionConditionedPredictor
-from hyperbolic_world_model.models.predictors.euclidean_head import make_mlp
 
 
 class HyperbolicHead(ActionConditionedPredictor):
-    """Geodesic residual MLP head on an arbitrary manifold.
-
-    Args:
-        manifold: any :class:`Manifold` (Poincaré, Lorentz, or Euclidean for consistency checks).
-        max_step: cap on the tangent-update norm per step, keeps ``expmap`` well-conditioned in
-            float32 far from the origin. Interpreted in the manifold's distance units.
-    """
+    """Geodesic residual head on an arbitrary manifold (Poincaré, Lorentz, or Euclidean)."""
 
     def __init__(
         self,
@@ -39,22 +33,32 @@ class HyperbolicHead(ActionConditionedPredictor):
         action_dim: int,
         hidden_dim: int = 256,
         n_layers: int = 2,
+        action_embed_dim: int = 32,
         embed_scale: float = 1.0,
-        seed: int = 0,
         max_step: float = 5.0,
+        seed: int = 0,
+        max_radius: float | None = 8.0,
     ) -> None:
-        super().__init__(manifold, encoder_dim, latent_dim, action_dim, embed_scale, seed)
-        self.max_step = float(max_step)
-        self.mlp = make_mlp(latent_dim + action_dim, hidden_dim, latent_dim, n_layers)
+        super().__init__(
+            manifold=manifold,
+            encoder_dim=encoder_dim,
+            latent_dim=latent_dim,
+            action_dim=action_dim,
+            hidden_dim=hidden_dim,
+            n_layers=n_layers,
+            action_embed_dim=action_embed_dim,
+            embed_scale=embed_scale,
+            max_step=max_step,
+            seed=seed,
+            max_radius=max_radius,
+        )
 
     def step(self, state: Tensor, action: Tensor) -> Tensor:
         m = self.manifold
-        v = m.euclidean_from_tangent0(m.logmap0(state))
-        u_eucl = clip_norm(self.mlp(torch.cat([v, action.to(v.dtype)], dim=-1)), self.max_step)
-        u0 = m.tangent0_from_euclidean(u_eucl)
+        u0 = self.lift(self.delta(state, action))
         origin = m.origin(*state.shape, dtype=state.dtype, device=state.device)
-        u = m.ptransp(origin, state, u0)
-        return m.proj(m.expmap(state, m.proj_tan(state, u)))
+        u = m.proj_tan(state, m.ptransp(origin, state, u0))
+        return self.retract(m.proj(m.expmap(state, u)))
 
 
 __all__ = ["HyperbolicHead"]

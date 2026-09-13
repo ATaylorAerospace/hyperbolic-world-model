@@ -1,35 +1,22 @@
 """Euclidean baseline predictor head.
 
-A residual MLP on ``[state, action]`` in flat space. Loss is squared Euclidean distance, which is
-``Euclidean().sqdist`` and therefore the same code path every other head uses.
+Identical to :class:`~hyperbolic_world_model.models.predictors.hyperbolic_head.HyperbolicHead`
+in every module and parameter; the only difference is :meth:`EuclideanHead.step`, which adds the
+proposed update in flat space. The loss is squared Euclidean distance, i.e. ``Euclidean().sqdist``,
+so it goes through the same ``Manifold`` code path as every other head.
 """
 
 from __future__ import annotations
 
-import torch
-from torch import Tensor, nn
+from torch import Tensor
 
 from hyperbolic_world_model.geometry.base import Manifold
 from hyperbolic_world_model.geometry.euclidean import Euclidean
-from hyperbolic_world_model.models.predictors.base import ActionConditionedPredictor
-
-
-def make_mlp(in_dim: int, hidden_dim: int, out_dim: int, n_layers: int) -> nn.Sequential:
-    """``n_layers`` hidden layers of width ``hidden_dim`` with GELU, zero-initialised output."""
-    layers: list[nn.Module] = []
-    d = in_dim
-    for _ in range(n_layers):
-        layers += [nn.Linear(d, hidden_dim), nn.GELU()]
-        d = hidden_dim
-    out = nn.Linear(d, out_dim)
-    nn.init.zeros_(out.weight)
-    nn.init.zeros_(out.bias)
-    layers.append(out)
-    return nn.Sequential(*layers)
+from hyperbolic_world_model.models.predictors.base import ActionConditionedPredictor, make_mlp
 
 
 class EuclideanHead(ActionConditionedPredictor):
-    """``s_{t+1} = s_t + MLP([s_t, a_t])`` in R^d."""
+    """``s_{t+1} = s_t + delta(s_t, a_t)`` in R^d, then the shared ``max_radius`` clip."""
 
     def __init__(
         self,
@@ -38,8 +25,11 @@ class EuclideanHead(ActionConditionedPredictor):
         action_dim: int,
         hidden_dim: int = 256,
         n_layers: int = 2,
+        action_embed_dim: int = 32,
         embed_scale: float = 1.0,
+        max_step: float = 5.0,
         seed: int = 0,
+        max_radius: float | None = 8.0,
         manifold: Manifold | None = None,
     ) -> None:
         manifold = Euclidean() if manifold is None else manifold
@@ -47,11 +37,22 @@ class EuclideanHead(ActionConditionedPredictor):
             raise TypeError(
                 "EuclideanHead requires the Euclidean manifold; use HyperbolicHead otherwise"
             )
-        super().__init__(manifold, encoder_dim, latent_dim, action_dim, embed_scale, seed)
-        self.mlp = make_mlp(latent_dim + action_dim, hidden_dim, latent_dim, n_layers)
+        super().__init__(
+            manifold=manifold,
+            encoder_dim=encoder_dim,
+            latent_dim=latent_dim,
+            action_dim=action_dim,
+            hidden_dim=hidden_dim,
+            n_layers=n_layers,
+            action_embed_dim=action_embed_dim,
+            embed_scale=embed_scale,
+            max_step=max_step,
+            seed=seed,
+            max_radius=max_radius,
+        )
 
     def step(self, state: Tensor, action: Tensor) -> Tensor:
-        return state + self.mlp(torch.cat([state, action.to(state.dtype)], dim=-1))
+        return self.retract(state + self.delta(state, action))
 
 
 __all__ = ["EuclideanHead", "make_mlp"]

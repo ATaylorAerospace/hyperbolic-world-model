@@ -1,17 +1,28 @@
-# Primary subject: V-JEPA 2 encoder (frozen) + a retrained action-conditioned predictor head.
+# Primary subject: the V-JEPA 2-AC checkpoint (vjepa2_ac_vit_giant) loaded via torch.hub.
+# It bundles a frozen ViT-g/16 encoder post-trained on DROID and Meta's action-conditioned
+# predictor. The encoder feeds every head; Meta's predictor is kept frozen as the reference
+# Euclidean baseline (bundle.reference_predictor).
 name: vjepa2_ac
-embed_dim: 1024                      # ViT-L hidden size
+embed_dim: 1408                      # ViT-g hidden size
 encoder:
-  model_id: facebook/vjepa2-vitl-fpc64-256
-  revision: null                     # pin a commit hash before reporting results
+  hub_repo: facebookresearch/vjepa2
+  hub_ref: 204698b45b3712590f06245fbfba32d3be539812   # upstream commit the wrapper was written against
+  pretrained: true                   # fetch vjepa2-ac-vitg.pt from Meta's official URL (cached under CKPT_ROOT)
+  checkpoint_url: https://dl.fbaipublicfiles.com/vjepa2/vjepa2-ac-vitg.pt
   frozen: true                       # asserted by train_predictor.py; never set to false
-  cache_dir: null                    # defaults to ${CKPT_ROOT}/encoders/vjepa2
-  pooling: mean
+  cache_dir: null                    # defaults to ${CKPT_ROOT}/encoders/vjepa2_ac
+  normalize_reps: true               # layer-normalise tokens as Meta's predictor expects
+  image_size: 256                    # frames must be 256x256 (16 px patches -> 256 tokens per frame)
+  action_dim: 7                      # DROID end-effector deltas
+  state_dim: 7                       # DROID proprioceptive state (used by the reference predictor only)
 head:
   type: hyperbolic                   # euclidean | hyperbolic (hyperbolic works for any geometry)
   latent_dim: 64                     # intrinsic manifold dimension; swept for dimension efficiency
   hidden_dim: 512
   n_layers: 3
-  embed_scale: 1.0
+  action_embed_dim: 64               # action embedding concatenated to the state coordinates
+  embed_scale: 0.25                # layer-normed 1408-d tokens project to ~sqrt(latent_dim) = 8 units at scale 1;
+                                   # 0.25 keeps embeddings ~2 units from the origin, inside the float32-safe region
   max_step: 5.0
+  max_radius: 8.0                  # geodesic retraction guard shared by both heads (null to disable)
   seed: 0

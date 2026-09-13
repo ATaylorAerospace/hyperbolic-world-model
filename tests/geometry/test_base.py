@@ -55,6 +55,14 @@ def test_registry_covers_every_case_and_build_manifold_accepts_both_keys() -> No
         build_manifold({"name": "poincare", "c": -1.0, "curvature": -1.0})
 
 
+def test_lambda0_is_the_origin_metric_scale(m: Manifold, dtype: torch.dtype) -> None:
+    v = torch.randn(16, D, dtype=dtype)
+    v = v / v.norm(dim=-1, keepdim=True) * 0.3
+    y = m.expmap0(m.tangent0_from_euclidean(v))
+    assert torch.allclose(m.dist0(y), torch.full((16,), m.lambda0 * 0.3, dtype=dtype), rtol=1e-4)
+    assert m.lambda0 == (2.0 if isinstance(m, PoincareBall) else 1.0)
+
+
 def test_curvature_name_offset_and_repr(m: Manifold) -> None:
     assert isinstance(m.curvature, float)
     assert (m.curvature == 0.0) == isinstance(m, Euclidean)

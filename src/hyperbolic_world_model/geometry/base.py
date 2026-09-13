@@ -54,6 +54,16 @@ class Manifold(ABC):
         """Extra ambient coordinates beyond the intrinsic dimension (``1`` for the hyperboloid)."""
         return 0
 
+    @property
+    def lambda0(self) -> float:
+        """Metric scale at the origin: ``dist0(expmap0(v)) == lambda0 * |v|`` for small ``v``.
+
+        ``1`` for Euclidean space and the hyperboloid, ``2`` for the Poincaré ball (its conformal
+        factor ``2 / (1 + c |x|^2)`` at ``x = 0``). Heads divide by it so that a Euclidean update
+        vector of norm ``r`` is a geodesic step of length ``r`` in every geometry.
+        """
+        return 1.0
+
     # ------------------------------------------------------------------ primitives
     @abstractmethod
     def expmap(self, x: Tensor, u: Tensor) -> Tensor:

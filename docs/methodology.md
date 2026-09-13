@@ -124,6 +124,19 @@ axis). The headline claim, if the hypothesis holds, is "hyperbolic reaches error
 - The embedding from encoder space onto the manifold is a frozen seeded projection in phase 1, so
   no geometry can "win" by collapsing its embedding. A learnable embedding with an anti-collapse
   regulariser is a phase-3 ablation, reported separately.
+- The two heads share every module and hyper-parameter (`tests/models/test_predictor_heads.py`
+  asserts identical parameter signatures and that the same seed gives identical initial weights).
+  Updates are expressed in geodesic units: a proposed vector of norm `r` moves the state by
+  geodesic distance `r` in every geometry (the Poincaré ball's origin metric scale of 2 is divided
+  out), so `max_step`, `embed_scale` and `max_radius` mean the same thing for every head, and the
+  Poincaré and Lorentz heads at equal curvature are isometric twins (tested).
+- Every head applies the same numerical guard: proposed updates are clipped to `max_step` and any
+  state beyond `max_radius` (default 8) is retracted along its geodesic to the origin. In flat
+  space this is a norm clip. It exists because float32 hyperbolic geometries lose accuracy
+  exponentially with distance (below); without it a Lorentz rollout of five maximal steps
+  produced NaNs in testing.
+- The V-JEPA 2-AC reference predictor (Meta's, frozen) is scored with Meta's own L1 loss on
+  layer-normalised tokens: the native-geometry rule applied to a Euclidean token-space model.
 
 ## Numerical caveats (measured, see `tests/geometry`)
 

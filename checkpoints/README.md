@@ -5,7 +5,7 @@ Gitignored except for this file. Override the root with `CKPT_ROOT` in `.env`.
 ```text
 checkpoints/
 ├── encoders/                   # frozen upstream weights, downloaded by scripts/download_weights.sh
-│   ├── vjepa2/                 # facebook/vjepa2-vitl-fpc64-256 (or the id set in configs/models/vjepa2_ac.yaml)
+│   ├── vjepa2_ac/              # vjepa2-ac-vitg.pt fetched by load_vjepa2_ac (torch.hub code cache lives in TORCH_HOME)
 │   ├── dinov2/                 # facebook/dinov2-base
 │   └── cosmos3-nano/           # nvidia Cosmos 3 Nano, generation and tokenizer only, never trained
 └── predictors/                 # trained predictor heads, one directory per Hydra run

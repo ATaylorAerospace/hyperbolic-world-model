@@ -38,6 +38,10 @@ class PoincareBall(Manifold):
         self._g = geoopt.PoincareBall(c=torch.tensor(-self.curvature, dtype=torch.float64))
         self.radius = 1.0 / math.sqrt(-self.curvature)
 
+    @property
+    def lambda0(self) -> float:
+        return 2.0
+
     # ------------------------------------------------------------------ Möbius arithmetic
     def lambda_x(self, x: Tensor, keepdim: bool = True) -> Tensor:
         """Conformal factor ``2 / (1 + c |x|^2)``."""

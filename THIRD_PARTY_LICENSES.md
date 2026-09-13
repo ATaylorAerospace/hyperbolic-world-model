@@ -21,7 +21,7 @@ source under the upstream terms.
 
 | Weights | How this repository uses them | Licence | Redistributed here? |
 |---|---|---|---|
-| V-JEPA 2 ViT-L (`facebook/vjepa2-vitl-fpc64-256`) | Frozen encoder; predictor head is retrained from scratch | Per the model card (code MIT) | No |
+| V-JEPA 2-AC ViT-g (`vjepa2_ac_vit_giant` via torch.hub, `vjepa2-ac-vitg.pt`) | Frozen encoder for every head; Meta's bundled predictor kept frozen as the reference Euclidean baseline; our heads are trained from scratch | Per the upstream release (code MIT) | No |
 | DINOv2 base (`facebook/dinov2-base`) | Frozen encoder for the DINO-WM subject | Apache 2.0 | No |
 | NVIDIA Cosmos 3 Nano (`nvidia/Cosmos-3-Nano`) | Inference only: trajectory generation and tokenizer latents for hyperbolicity probing. Never fine-tuned, never modified. | NVIDIA Open Model Licence / OpenMDW 1.1 (gated; accept on the Hub) | No |
 
