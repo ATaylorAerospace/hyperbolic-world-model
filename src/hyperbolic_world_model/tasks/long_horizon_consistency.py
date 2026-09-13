@@ -8,7 +8,8 @@ distance between the two rollouts at horizon ``h``) and pixel/encoder divergence
 corresponding generated frames. Falsified if the hyperbolic head's correlation is not higher than
 the Euclidean head's, or if its latent divergence saturates earlier.
 
-TODO(phase 2): implement using ``Cosmos3TrajectoryDataset.branches`` (requires generated data).
+TODO(phase 2): implement using ``Cosmos3TrajectoryDataset.branch_pairs()`` (start windows sharing a
+start frame) and ``.latents(idx)`` for the encoder-space divergence; requires generated data.
 """
 
 from __future__ import annotations

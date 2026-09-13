@@ -6,7 +6,8 @@ primitives but *not* on every combination will roll out unseen combinations with
 gap is not smaller for the best swept curvature, or if it is smaller only because seen-combination
 error got worse.
 
-TODO(phase 2): implement the split (``data.holdout_combinations``) and reuse
+TODO(phase 2): implement with ``Cosmos3TrajectoryDataset.split_by_combination(cfg.data.holdout_combinations)``
+(or the DROID equivalent) and reuse
 :class:`~hyperbolic_world_model.tasks.latent_rollout.LatentRolloutTask` on each subset.
 """
 

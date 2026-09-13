@@ -14,6 +14,7 @@ source under the upstream terms.
 | DINOv2 (code) | Frozen image encoder for the DINO-WM subject | Apache 2.0 | https://github.com/facebookresearch/dinov2 |
 | Hydra / OmegaConf | Configuration and sweeps | Apache 2.0 (Hydra), BSD-3 (OmegaConf) | https://github.com/facebookresearch/hydra |
 | transformers | Loading DINOv2 from the Hugging Face Hub | Apache 2.0 | https://github.com/huggingface/transformers |
+| cosmos_predict2 (NVIDIA, not a dependency; installed separately on the generation machine) | Action-conditioned generation and tokenizer latents, inference only | Apache 2.0 | https://github.com/nvidia-cosmos/cosmos-predict2.5 |
 | timm (optional `vjepa2` extra) | Required by the upstream vjepa2 code that torch.hub imports for the V-JEPA 2-AC loader | Apache 2.0 | https://github.com/huggingface/pytorch-image-models |
 | PyTorch | Tensors and autograd | BSD-3 | https://github.com/pytorch/pytorch |
 | einops, numpy, pandas, matplotlib, huggingface_hub | Utilities | MIT / BSD-3 / BSD-3 / PSF-based / Apache 2.0 | respective repositories |
