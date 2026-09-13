@@ -1,0 +1,4 @@
+# Open-loop rollout error vs horizon, scored with the geodesic distance of the model's geometry.
+- name: latent_rollout
+  horizon: 8
+  batch_size: 32

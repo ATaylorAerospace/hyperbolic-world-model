@@ -1,0 +1,17 @@
+# Primary subject: V-JEPA 2 encoder (frozen) + a retrained action-conditioned predictor head.
+name: vjepa2_ac
+embed_dim: 1024                      # ViT-L hidden size
+encoder:
+  model_id: facebook/vjepa2-vitl-fpc64-256
+  revision: null                     # pin a commit hash before reporting results
+  frozen: true                       # asserted by train_predictor.py; never set to false
+  cache_dir: null                    # defaults to ${CKPT_ROOT}/encoders/vjepa2
+  pooling: mean
+head:
+  type: hyperbolic                   # euclidean | hyperbolic (hyperbolic works for any geometry)
+  latent_dim: 64                     # intrinsic manifold dimension; swept for dimension efficiency
+  hidden_dim: 512
+  n_layers: 3
+  embed_scale: 1.0
+  max_step: 5.0
+  seed: 0

@@ -1,0 +1,17 @@
+# Secondary subject: DINOv2 encoder (frozen) + retrained predictor head, after DINO-WM.
+name: dino_wm
+embed_dim: 768                       # dinov2-base hidden size
+encoder:
+  model_id: facebook/dinov2-base
+  revision: null
+  frozen: true
+  cache_dir: null                    # defaults to ${CKPT_ROOT}/encoders/dinov2
+  pooling: cls
+head:
+  type: hyperbolic
+  latent_dim: 64
+  hidden_dim: 256
+  n_layers: 2
+  embed_scale: 1.0
+  max_step: 5.0
+  seed: 0

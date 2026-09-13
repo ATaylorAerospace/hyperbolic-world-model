@@ -1,0 +1,4 @@
+# Latent divergence between branching Cosmos 3 rollouts that share a start frame.
+- name: long_horizon_consistency
+  horizon: 32
+  batch_size: 16

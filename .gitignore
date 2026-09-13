@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets and environment
+.env
+*.pem
+*.key
+
+# Experiment artefacts (large, regenerable)
+data/*
+!data/README.md
+checkpoints/*
+!checkpoints/README.md
+outputs/*
+!outputs/README.md
+wandb/
+mlruns/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.npz
+*.mp4
+
+# Hydra
+multirun/
+.hydra/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/settings.local.json
