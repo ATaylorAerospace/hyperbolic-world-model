@@ -16,17 +16,18 @@ What is written (see ``outputs/README.md``):
     every ``(run, task, metric)`` with its geometry, curvature, latent dimension and seed;
 ``tables/summary.md``
     mean ± std over seeds per configuration;
-``tables/<task>__<metric>__curvature_sweep.md``
+``tables/<model>__<task>__<metric>__curvature_sweep.md``
     for every result metric with more than one curvature: the ``(geometry, K) x dim`` grid;
+    every table and figure is per model (encoder), so models are never mixed;
 ``tables/best_curvature_vs_euclidean.md``
     per task, metric and dimension: the Euclidean baseline against the best swept curvature and
     whether the difference exceeds one seed std at both configurations;
 ``tables/dimension_efficiency.md``
     log2 AUC of every metric-vs-dimension curve and the dimension at which each geometry reaches
     the Euclidean baseline;
-``figures/<task>__<metric>__vs_curvature.png`` and ``figures/<task>__<metric>__vs_dimension.png``
+``figures/<model>__<task>__<metric>__vs_curvature.png`` and ``..._vs_dimension.png``
     one per result metric with more than one curvature / more than one dimension;
-``figures/<task>__curves.png``
+``figures/<model>__<task>__curves.png``
     every ``<task>_curves.csv`` overlaid (seeds averaged), one panel per curve column;
 ``README.md``
     an index of everything above.
@@ -66,17 +67,17 @@ def clean_report_dir(report: Path) -> None:
             path.unlink()
 
 
-def collect_curves(runs: list[dict]) -> dict[str, pd.DataFrame]:
-    """``task -> DataFrame`` of every ``<task>_curves.csv`` with the run keys and seed attached."""
-    frames: dict[str, list[pd.DataFrame]] = {}
+def collect_curves(runs: list[dict]) -> dict[tuple[str, str], pd.DataFrame]:
+    """``(model, task) -> DataFrame`` of every ``<task>_curves.csv`` with the run keys attached."""
+    frames: dict[tuple[str, str], list[pd.DataFrame]] = {}
     for run in runs:
         for csv in sorted(Path(run["_path"]).glob("*_curves.csv")):
             task = csv.name[: -len("_curves.csv")]
             df = pd.read_csv(csv)
-            for key in [*CURVE_KEYS, "seed"]:
+            for key in [*CURVE_KEYS, "model", "seed"]:
                 df[key] = run.get(key)
-            frames.setdefault(task, []).append(df)
-    return {task: pd.concat(dfs, ignore_index=True) for task, dfs in sorted(frames.items())}
+            frames.setdefault((str(run.get("model")), task), []).append(df)
+    return {key: pd.concat(dfs, ignore_index=True) for key, dfs in sorted(frames.items())}
 
 
 def curve_x_column(df: pd.DataFrame) -> str | None:
@@ -112,18 +113,22 @@ def make_report(outputs: Path, report: Path) -> list[Path]:
 
     best_rows, eff_rows = [], []
     if not summary.empty:
-        for (task, metric), grp in summary.groupby(["task", "metric"], sort=True):
+        # One slice per model (encoder): models are never overlaid or averaged together.
+        for (model, task, metric), grp in summary.groupby(
+            ["model", "task", "metric"], dropna=False, sort=True
+        ):
             if not is_result_metric(metric):
                 continue
-            stem = f"{task}__{metric}"
+            per_model = summary[summary["model"] == model]
+            stem = f"{model}__{task}__{metric}"
             n_curv = grp[grp["geometry"] != "euclidean"]["curvature"].nunique()
             n_dims = grp["latent_dim"].nunique()
             if n_curv > 1:
                 written.append(
                     _write_md(
                         tables_dir / f"{stem}__curvature_sweep.md",
-                        f"{task}: {metric} vs curvature",
-                        to_markdown(sweep_table(summary, task, metric)),
+                        f"{model} / {task}: {metric} vs curvature",
+                        to_markdown(sweep_table(per_model, task, metric)),
                     )
                 )
                 written.append(
@@ -133,8 +138,8 @@ def make_report(outputs: Path, report: Path) -> list[Path]:
                 written.append(
                     plot_dimension_curves(grp, metric, figs_dir / f"{stem}__vs_dimension.png")
                 )
-                eff_rows.append(dimension_efficiency_table(summary, task, metric))
-            best_rows.append(best_curvature_table(summary, task, metric))
+                eff_rows.append(dimension_efficiency_table(per_model, task, metric))
+            best_rows.append(best_curvature_table(per_model, task, metric))
     best = (
         pd.concat(best_rows, ignore_index=True)
         if best_rows
@@ -160,11 +165,15 @@ def make_report(outputs: Path, report: Path) -> list[Path]:
         )
     )
 
-    for task, curves in collect_curves(runs).items():
+    for (model, task), curves in collect_curves(runs).items():
         x = curve_x_column(curves)
         if x is None:
             continue
-        written.append(plot_task_curves(curves, x, task, figs_dir / f"{task}__curves.png"))
+        written.append(
+            plot_task_curves(
+                curves, x, f"{model} / {task}", figs_dir / f"{model}__{task}__curves.png"
+            )
+        )
 
     written = sorted(set(written))
     index = ["# Report", "", HEADER, "", f"Runs found: {len(runs)}", "", "## Tables", ""]

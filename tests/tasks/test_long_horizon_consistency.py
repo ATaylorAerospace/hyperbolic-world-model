@@ -149,12 +149,17 @@ def test_horizon_is_capped_by_the_shortest_branch() -> None:
     assert res.metrics["horizon"] == 3 and len(res.curves) == 3
 
 
-def test_pairs_must_share_their_start_frame() -> None:
+def test_pairs_must_share_their_start_frame_up_to_video_quantisation() -> None:
     ds = BranchingDataset(n_prompts=1, n_branches=2, horizon=2)
     ds.items[1]["frames"] = ds.items[1]["frames"].clone()
-    ds.items[1]["frames"][0] += 0.5
+    ds.items[1]["frames"][0] += 2 / 255  # two uint8 quanta, as separate mp4 decodes can differ
+    res = LongHorizonConsistencyTask(horizon=2).run(tiny_bundle(perturb=0.2), ds)
+    assert res.metrics["n_pairs"] == 1
+    ds.items[1]["frames"][0] += 0.5  # a different frame altogether
     with pytest.raises(ValueError, match="share their start frame"):
         LongHorizonConsistencyTask(horizon=2).run(tiny_bundle(), ds)
+    with pytest.raises(ValueError, match="share their start frame"):
+        LongHorizonConsistencyTask(horizon=2, start_atol=0.0).run(tiny_bundle(), ds)
 
 
 def test_constructor_validation() -> None:

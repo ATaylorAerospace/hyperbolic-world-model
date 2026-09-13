@@ -71,7 +71,10 @@ class LongHorizonConsistencyTask(Task):
         batch_size: number of pairs per batch.
         saturation_fraction: fraction of the maximum mean latent divergence that defines
             saturation.
-        start_atol: tolerance when checking that paired branches share their start frame.
+        start_atol: largest per-pixel difference (frames in ``[0, 1]``) tolerated between the
+            start frames of a pair. Branches of a real prompt are decoded from separate video
+            files and resized, so their start frames agree only to a few uint8 quanta; the
+            default allows five (``5 / 255``), far below the difference between distinct frames.
     """
 
     name = "long_horizon_consistency"
@@ -81,7 +84,7 @@ class LongHorizonConsistencyTask(Task):
         horizon: int = 32,
         batch_size: int = 16,
         saturation_fraction: float = 0.95,
-        start_atol: float = 1e-6,
+        start_atol: float = 5 / 255,
     ) -> None:
         if int(horizon) < 1:
             raise ValueError("horizon must be >= 1")
@@ -125,8 +128,12 @@ class LongHorizonConsistencyTask(Task):
         for start in range(0, len(pairs), self.batch_size):
             a, b, h = self._stack_pairs(dataset, pairs[start : start + self.batch_size])
             fa, fb = a["frames"].to(device), b["frames"].to(device)
-            if not torch.allclose(fa[:, 0], fb[:, 0], atol=self.start_atol):
-                raise ValueError("paired branches must share their start frame")
+            gap = float((fa[:, 0] - fb[:, 0]).abs().max())
+            if gap > self.start_atol:
+                raise ValueError(
+                    f"paired branches must share their start frame (max pixel gap {gap:.4f} > "
+                    f"start_atol {self.start_atol:.4f})"
+                )
             enc_a, enc_b = bundle.encoder.encode(fa), bundle.encoder.encode(fb)  # (B, h+1, D)
             z_a, z_b = head.embed(enc_a), head.embed(enc_b)  # (B, h+1, d) on the manifold
             roll_a = head.rollout(z_a[:, 0], a["actions"].to(device))  # (B, h, d)

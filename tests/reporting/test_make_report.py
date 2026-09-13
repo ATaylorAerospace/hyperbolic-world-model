@@ -15,16 +15,16 @@ EXPECTED_TABLES = {
     "summary.md",
     "best_curvature_vs_euclidean.md",
     "dimension_efficiency.md",
-    "latent_rollout__geodesic_error_hmax__curvature_sweep.md",
-    "hierarchy_reconstruction__map__curvature_sweep.md",
+    "synthetic__latent_rollout__geodesic_error_hmax__curvature_sweep.md",
+    "synthetic__hierarchy_reconstruction__map__curvature_sweep.md",
 }
 EXPECTED_FIGURES = {
-    "latent_rollout__geodesic_error_hmax__vs_curvature.png",
-    "latent_rollout__geodesic_error_hmax__vs_dimension.png",
-    "hierarchy_reconstruction__map__vs_curvature.png",
-    "hierarchy_reconstruction__map__vs_dimension.png",
-    "latent_rollout__curves.png",
-    "hierarchy_reconstruction__curves.png",
+    "synthetic__latent_rollout__geodesic_error_hmax__vs_curvature.png",
+    "synthetic__latent_rollout__geodesic_error_hmax__vs_dimension.png",
+    "synthetic__hierarchy_reconstruction__map__vs_curvature.png",
+    "synthetic__hierarchy_reconstruction__map__vs_dimension.png",
+    "synthetic__latent_rollout__curves.png",
+    "synthetic__hierarchy_reconstruction__curves.png",
 }
 
 
@@ -73,7 +73,7 @@ def test_without_a_sweep_there_are_no_curvature_figures(tmp_path: Path) -> None:
     written = make_report(outputs, tmp_path / "report")
     names = {p.name for p in written}
     assert not any("curvature" in n and n.endswith(".png") for n in names)
-    assert "latent_rollout__geodesic_error_hmax__vs_dimension.png" in names
+    assert "synthetic__latent_rollout__geodesic_error_hmax__vs_dimension.png" in names
     best = (tmp_path / "report" / "tables" / "best_curvature_vs_euclidean.md").read_text()
     assert "| no |" in best and "| yes |" not in best
 
@@ -100,3 +100,23 @@ def test_cli_prints_every_written_path(tmp_path: Path, capsys: pytest.CaptureFix
     assert len(lines) == len(set(lines)) >= 5
     assert all(Path(line).exists() for line in lines)
     assert lines == [*sorted(lines[:-1]), lines[-1]] and lines[-1].endswith("README.md")
+
+
+def test_models_are_never_mixed(tmp_path: Path) -> None:
+    """Two encoders in one outputs/ tree get separate tables, figures and within-model comparisons."""
+    outputs = write_outputs_tree(tmp_path / "outputs")
+    write_outputs_tree(outputs / "dino", model="dino_wm", offset=2.0)  # same grid, values + 2
+    written = make_report(outputs, tmp_path / "report")
+    names = {p.name for p in written}
+    for model in ("synthetic", "dino_wm"):
+        assert f"{model}__latent_rollout__geodesic_error_hmax__curvature_sweep.md" in names
+        assert f"{model}__latent_rollout__geodesic_error_hmax__vs_curvature.png" in names
+        assert f"{model}__latent_rollout__curves.png" in names
+    best = (tmp_path / "report" / "tables" / "best_curvature_vs_euclidean.md").read_text()
+    rows = [ln for ln in best.splitlines() if "| geodesic_error_hmax |" in ln]
+    assert len(rows) == 4  # two models x two dimensions
+    for ln in rows:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        improvement = float(cells[-2])
+        assert improvement == pytest.approx(0.2, abs=1e-6)  # the within-model gain, not 2.2
+        assert cells[-1] == "yes"

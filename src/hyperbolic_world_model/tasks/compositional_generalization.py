@@ -8,9 +8,9 @@ error got worse.
 
 The split is the dataset's own ``split_by_combination`` when it has one
 (:class:`~hyperbolic_world_model.data.cosmos3.dataset.Cosmos3TrajectoryDataset`) and otherwise
-:func:`split_by_combination` over the per-item metadata, with the same safety checks: every
-held-out combination must occur, and holding it out must not remove an embodiment or a primitive
-entirely (that would test extrapolation, not composition). The trainer applies the same split to
+:func:`~hyperbolic_world_model.data.splits.split_by_combination` over the per-item metadata; both
+paths run the same shared safety checks (every held-out combination must occur, and holding it
+out must not remove an embodiment or a primitive entirely). The trainer applies the same split to
 the training set (``data.holdout_combinations``), so the evaluation here measures generalisation
 to combinations the head never saw.
 
@@ -21,61 +21,20 @@ across curvatures.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+from hyperbolic_world_model.data.splits import (
+    COMBINATION_KEYS,
+    normalise_holdout,
+    split_by_combination,
+)
 from hyperbolic_world_model.models.registry import ModelBundle
 from hyperbolic_world_model.tasks.base import Task, TaskResult
 from hyperbolic_world_model.tasks.latent_rollout import LatentRolloutTask
-
-COMBINATION_KEYS: tuple[str, str] = ("embodiment", "primitive")
-
-
-def normalise_holdout(holdout: Iterable[Sequence[str]] | None) -> tuple[tuple[str, str], ...]:
-    """``[[embodiment, primitive], ...]`` (lists, tuples or Hydra containers) -> tuple of pairs."""
-    pairs = []
-    for combo in holdout or ():
-        combo = tuple(str(x) for x in combo)
-        if len(combo) != 2:
-            raise ValueError(
-                f"each held-out combination must be [embodiment, primitive], got {combo}"
-            )
-        pairs.append(combo)
-    return tuple(pairs)
-
-
-def split_by_combination(
-    metadata: Sequence[Mapping[str, str]],
-    holdout: Iterable[Sequence[str]],
-    keys: tuple[str, str] = COMBINATION_KEYS,
-) -> tuple[list[int], list[int]]:
-    """``(seen, held_out)`` item indices from per-item metadata.
-
-    Mirrors ``Cosmos3TrajectoryDataset.split_by_combination`` for datasets that only expose
-    metadata: raises if a held-out combination never occurs or if holding it out removes an
-    embodiment or a primitive entirely.
-    """
-    held = set(normalise_holdout(holdout))
-    combos = [(str(rec[keys[0]]), str(rec[keys[1]])) for rec in metadata]
-    present = set(combos)
-    missing = held - present
-    if missing:
-        raise ValueError(f"held-out combinations not present in the data: {sorted(missing)}")
-    seen_combos = present - held
-    if held and (
-        {e for e, _ in seen_combos} != {e for e, _ in present}
-        or {p for _, p in seen_combos} != {p for _, p in present}
-    ):
-        raise ValueError(
-            "holding out these combinations removes an embodiment or primitive entirely"
-        )
-    seen, out = [], []
-    for i, combo in enumerate(combos):
-        (out if combo in held else seen).append(i)
-    return seen, out
 
 
 def split_dataset_by_combination(

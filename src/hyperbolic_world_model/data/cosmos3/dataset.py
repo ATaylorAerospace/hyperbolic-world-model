@@ -36,6 +36,7 @@ from torch.utils.data import Dataset
 
 from hyperbolic_world_model.data.cosmos3 import default_root
 from hyperbolic_world_model.data.cosmos3.generate import read_manifest
+from hyperbolic_world_model.data.splits import COMBINATION_KEYS, split_by_combination
 
 
 @dataclass(frozen=True)
@@ -138,23 +139,12 @@ class Cosmos3TrajectoryDataset(Dataset):
     def split_by_combination(self, holdout: Sequence[Sequence[str]]) -> tuple[list[int], list[int]]:
         """``(seen, held_out)`` item indices; ``holdout`` is a list of ``[embodiment, primitive]`` pairs.
 
-        Raises if a held-out combination never occurs, or if holding it out removes an embodiment
-        or a primitive entirely (then the task would test extrapolation, not composition).
+        Delegates to :func:`~hyperbolic_world_model.data.splits.split_by_combination`, which raises
+        if a held-out combination never occurs or if holding it out removes an embodiment or a
+        primitive entirely.
         """
-        held = {(str(e), str(p)) for e, p in holdout}
-        present = self.combinations()
-        missing = held - present
-        if missing:
-            raise ValueError(f"held-out combinations not present in the data: {sorted(missing)}")
-        seen_combos = present - held
-        if held and (
-            {e for e, _ in seen_combos} != {e for e, _ in present} or {p for _, p in seen_combos} != {p for _, p in present}
-        ):
-            raise ValueError("holding out these combinations removes an embodiment or primitive entirely")
-        seen, out = [], []
-        for i in range(len(self)):
-            (out if self.combination(i) in held else seen).append(i)
-        return seen, out
+        combos = [dict(zip(COMBINATION_KEYS, self.combination(i), strict=True)) for i in range(len(self))]
+        return split_by_combination(combos, holdout)
 
     def metadata(self) -> list[dict[str, str]]:
         """Per-item ``{embodiment, task, primitive}`` for :func:`data.hierarchies.build_hierarchy`."""

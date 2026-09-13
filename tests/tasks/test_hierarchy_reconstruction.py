@@ -145,5 +145,12 @@ def test_custom_levels() -> None:
     assert res.metrics["n_nodes"] == 1 + 2 + 4 and res.curves["level"].tolist() == [
         "root",
         "embodiment",
-        "task",
+        "primitive",
     ]
+    tree = build_hierarchy(
+        [{"task": "t", "primitive": "p", "embodiment": "e"}], ("task", "primitive")
+    )
+    assert tree.levels == ["root", "task", "primitive"] and tree.level_names == (
+        "task",
+        "primitive",
+    )

@@ -9,12 +9,16 @@ Tables:
 * :func:`results_table`: one row per ``(run, task, metric)``, the long form everything else is
   derived from;
 * :func:`summary_table`: mean, std and count over seeds per configuration;
-* :func:`sweep_table`: one metric as a ``(geometry, curvature) x latent_dim`` grid of
+* :func:`sweep_table`: one metric as a ``(model, geometry, curvature) x latent_dim`` grid of
   ``mean ± std`` cells, the "full curve" the methodology requires;
-* :func:`best_curvature_table`: per latent dimension, the Euclidean baseline against the best
-  swept curvature, with the methodology's one-std rule applied;
-* :func:`dimension_efficiency_table`: log2 area under the metric-vs-dimension curve per geometry
-  and curvature, and the dimension at which each reaches the Euclidean baseline.
+* :func:`best_curvature_table`: per model and latent dimension, the Euclidean baseline against
+  the best swept curvature, with the methodology's one-std rule applied;
+* :func:`dimension_efficiency_table`: per model, the log2 area under the metric-vs-dimension
+  curve for every geometry and curvature, and the dimension at which each reaches the Euclidean
+  baseline.
+
+Models (encoders) are never mixed in a comparison: a V-JEPA baseline is only ever compared with
+V-JEPA hyperbolic heads, and every table and figure carries the model name.
 """
 
 from __future__ import annotations
@@ -144,35 +148,37 @@ def format_mean_std(mean: float, std: float, n: int, float_fmt: str = "{:.4f}") 
 
 
 def sweep_table(summary: pd.DataFrame, task: str, metric: str) -> pd.DataFrame:
-    """``(geometry, curvature)`` rows x ``latent_dim`` columns of ``mean ± std`` for one metric."""
+    """``(model, geometry, curvature)`` rows x ``latent_dim`` columns of ``mean ± std`` for one metric.
+
+    Repeated runs of the same configuration under different experiment names are averaged (with
+    the seed-count-weighted mean of their means); models are kept apart.
+    """
     df = summary[(summary["task"] == task) & (summary["metric"] == metric)]
     dims = sorted(int(d) for d in df["latent_dim"].dropna().unique())
     rows = []
-    for (geometry, curvature), grp in df.groupby(
-        ["geometry", "curvature"], dropna=False, sort=True
+    for (model, geometry, curvature), grp in df.groupby(
+        ["model", "geometry", "curvature"], dropna=False, sort=True
     ):
-        row = {"geometry": geometry, "curvature": curvature}
+        row = {"model": model, "geometry": geometry, "curvature": curvature}
         for d in dims:
             cell = grp[grp["latent_dim"] == d]
-            row[f"dim={d}"] = (
-                ""
-                if cell.empty
-                else format_mean_std(
-                    float(cell["mean"].iloc[0]),
-                    float(cell["std"].iloc[0]),
-                    int(cell["n_seeds"].iloc[0]),
-                )
-            )
+            if cell.empty:
+                row[f"dim={d}"] = ""
+            else:
+                n = int(cell["n_seeds"].sum())
+                mean = float((cell["mean"] * cell["n_seeds"]).sum() / n)
+                row[f"dim={d}"] = format_mean_std(mean, float(cell["std"].max()), n)
         rows.append(row)
-    cols = ["geometry", "curvature", *(f"dim={d}" for d in dims)]
+    cols = ["model", "geometry", "curvature", *(f"dim={d}" for d in dims)]
     out = pd.DataFrame(rows, columns=cols)
-    return out.sort_values(["geometry", "curvature"], kind="stable").reset_index(drop=True)
+    return out.sort_values(["model", "geometry", "curvature"], kind="stable").reset_index(drop=True)
 
 
 def best_curvature_table(summary: pd.DataFrame, task: str, metric: str) -> pd.DataFrame:
-    """Per latent dimension: Euclidean baseline vs the best swept curvature for one metric.
+    """Per model and latent dimension: Euclidean baseline vs the best swept curvature for one metric.
 
-    ``exceeds_one_std`` applies the statistical protocol of ``docs/methodology.md``: a difference
+    Models are never mixed: the baseline and the best hyperbolic row come from the same
+    ``model`` (the encoder), across every experiment that ran it. ``exceeds_one_std`` applies the statistical protocol of ``docs/methodology.md``: a difference
     counts only if it exceeds one seed standard deviation at *both* configurations, which needs at
     least two seeds on each side (``n_seeds`` is the smaller of the two counts; with fewer than two
     the flag is always ``no``). Rows with no Euclidean run, or no hyperbolic run, at that dimension
@@ -181,6 +187,7 @@ def best_curvature_table(summary: pd.DataFrame, task: str, metric: str) -> pd.Da
     lower = lower_is_better(metric)
     df = summary[(summary["task"] == task) & (summary["metric"] == metric)]
     cols = [
+        "model",
         "task",
         "metric",
         "latent_dim",
@@ -195,11 +202,19 @@ def best_curvature_table(summary: pd.DataFrame, task: str, metric: str) -> pd.Da
         "exceeds_one_std",
     ]
     rows = []
-    for d in sorted(int(x) for x in df["latent_dim"].dropna().unique()):
-        at_d = df[df["latent_dim"] == d]
+    for model, per_model in df.groupby("model", dropna=False, sort=True):
+        for d in sorted(int(x) for x in per_model["latent_dim"].dropna().unique()):
+            at_d = per_model[per_model["latent_dim"] == d]
+            rows.append(_best_row(at_d, str(model), task, metric, d, lower))
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _best_row(at_d: pd.DataFrame, model: str, task: str, metric: str, d: int, lower: bool) -> dict:
+    """One row of :func:`best_curvature_table` for a single model and dimension."""
+    if True:
         euc = at_d[at_d["geometry"] == "euclidean"]
         hyp = at_d[at_d["geometry"] != "euclidean"]
-        row: dict = {"task": task, "metric": metric, "latent_dim": d}
+        row: dict = {"model": model, "task": task, "metric": metric, "latent_dim": d}
         n_seeds = math.inf
         if not euc.empty:
             row["euclidean_mean"] = float(euc["mean"].mean())
@@ -226,12 +241,11 @@ def best_curvature_table(summary: pd.DataFrame, task: str, metric: str) -> pd.Da
             )
         else:
             row["improvement"], row["exceeds_one_std"] = math.nan, False
-        rows.append(row)
-    return pd.DataFrame(rows, columns=cols)
+        return row
 
 
 def dimension_efficiency_table(summary: pd.DataFrame, task: str, metric: str) -> pd.DataFrame:
-    """Log2 AUC and dimension-to-reach per ``geometry(K=...)`` for one metric.
+    """Per model: log2 AUC and dimension-to-reach per ``geometry(K=...)`` for one metric.
 
     The threshold for ``dim_to_reach`` is the Euclidean baseline's value at its largest
     dimension, so the column reads "the dimension at which this geometry matches the flat
@@ -240,6 +254,7 @@ def dimension_efficiency_table(summary: pd.DataFrame, task: str, metric: str) ->
     lower = lower_is_better(metric)
     df = summary[(summary["task"] == task) & (summary["metric"] == metric)].copy()
     cols = [
+        "model",
         "task",
         "metric",
         "label",
@@ -255,13 +270,19 @@ def dimension_efficiency_table(summary: pd.DataFrame, task: str, metric: str) ->
         f"{g}" if g == "euclidean" else f"{g}(K={k})"
         for g, k in zip(df["geometry"], df["curvature"], strict=True)
     ]
-    curves = curves_from_table(df, label_col="label", dim_col="latent_dim", value_col="mean")
-    euc = df[df["geometry"] == "euclidean"].sort_values("latent_dim")
-    threshold = float(euc["mean"].iloc[-1]) if not euc.empty else None
-    out = efficiency_table(curves, threshold=threshold, lower_is_better=lower)
-    out.insert(0, "metric", metric)
-    out.insert(0, "task", task)
-    return out[cols]
+    parts = []
+    for model, per_model in df.groupby("model", dropna=False, sort=True):
+        curves = curves_from_table(
+            per_model, label_col="label", dim_col="latent_dim", value_col="mean"
+        )
+        euc = per_model[per_model["geometry"] == "euclidean"].sort_values("latent_dim")
+        threshold = float(euc["mean"].iloc[-1]) if not euc.empty else None
+        out = efficiency_table(curves, threshold=threshold, lower_is_better=lower)
+        out.insert(0, "metric", metric)
+        out.insert(0, "task", task)
+        out.insert(0, "model", str(model))
+        parts.append(out)
+    return pd.concat(parts, ignore_index=True)[cols]
 
 
 def _format_cell(col: str, v: object, float_fmt: str) -> str:

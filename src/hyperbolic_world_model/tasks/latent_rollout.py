@@ -22,11 +22,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from hyperbolic_world_model.metrics.geodesic_error import (
-    geodesic_error,
-    geodesic_error_per_horizon,
-    static_baseline_error,
-)
+from hyperbolic_world_model.metrics.geodesic_error import geodesic_error, static_baseline_error
 from hyperbolic_world_model.models.registry import ModelBundle
 from hyperbolic_world_model.tasks.base import Task, TaskResult
 
@@ -139,4 +135,4 @@ class LatentRolloutTask(Task):
         return res
 
 
-__all__ = ["LatentRolloutTask", "RolloutErrors", "geodesic_error_per_horizon"]
+__all__ = ["LatentRolloutTask", "RolloutErrors"]

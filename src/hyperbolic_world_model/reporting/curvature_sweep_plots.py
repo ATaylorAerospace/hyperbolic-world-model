@@ -141,25 +141,10 @@ def plot_task_curves(curves: pd.DataFrame, x: str, task: str, out_path: Path) ->
     return _save(fig, out_path)
 
 
-def plot_rollout_curves(curve_files: dict[str, Path], out_path: Path) -> Path:
-    """Geodesic error vs horizon, one line per labelled ``latent_rollout_curves.csv``."""
-    fig, ax = plt.subplots(figsize=(6, 4))
-    for label, path in sorted(curve_files.items()):
-        df = pd.read_csv(path)
-        ax.plot(df["horizon"], df["geodesic_error"], marker="o", label=label)
-    ax.set_xlabel("horizon")
-    ax.set_ylabel("geodesic error (native geometry)")
-    if curve_files:
-        ax.legend(fontsize=7)
-    fig.tight_layout()
-    return _save(fig, out_path)
-
-
 __all__ = [
     "CURVE_KEYS",
     "aggregate_curves",
     "plot_curvature_sweep",
     "plot_dimension_curves",
-    "plot_rollout_curves",
     "plot_task_curves",
 ]
