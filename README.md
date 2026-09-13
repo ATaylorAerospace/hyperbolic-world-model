@@ -1,6 +1,6 @@
-[![hyperbolic-world-model](docs/header.png)](https://github.com/ATaylorAerospace/hyperbolic-world-model)
+[![Hyperbolic Evaluation](docs/header.png)](https://github.com/ATaylorAerospace/hyperbolic-world-model)
 
-# 🌀 hyperbolic-world-model - Hyperbolic Latent Evaluation for World Models 📐
+# 🌀 Hyperbolic Evaluation - Hyperbolic Latent Evaluation for World Models 📐
 
 [![CI](https://github.com/ATaylorAerospace/hyperbolic-world-model/actions/workflows/ci.yml/badge.svg)](https://github.com/ATaylorAerospace/hyperbolic-world-model/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
