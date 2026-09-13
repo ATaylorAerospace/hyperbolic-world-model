@@ -1,6 +1,7 @@
-# How Cosmos is used, and how it is not
+# How Cosmos 3 is used, and how it is not
 
-NVIDIA Cosmos appears in this repository in exactly two roles, both inference-only:
+NVIDIA Cosmos 3 (the Nano model, `nvidia/Cosmos3-Nano`, driven through NVIDIA's
+[cosmos-framework](https://github.com/nvidia/cosmos-framework)) appears in this repository in exactly two roles, both inference-only:
 **a data generator** and **a latent-space probe target**. Three rules are non-negotiable:
 
 1. **We never fine-tune, post-train, distil, quantise-for-training, or otherwise modify Cosmos.**
@@ -11,9 +12,9 @@ NVIDIA Cosmos appears in this repository in exactly two roles, both inference-on
    scores the generated videos. Cosmos is an instrument for producing controlled inputs, not a
    subject of the evaluation. If a generated rollout is visibly wrong, the fix is to regenerate or
    exclude it, and the manifest records what was excluded; the quality itself is not a finding.
-3. **No Cosmos weights are redistributed.** Users download them from NVIDIA under NVIDIA's terms
-   (OpenMDW 1.1 for the Cosmos 3 release, the NVIDIA Open Model License for Cosmos-Predict2.5).
-   Generated videos and latents live under `data/` and are gitignored.
+3. **No Cosmos weights are redistributed.** Users download them from the Hugging Face Hub under
+   NVIDIA's terms (OpenMDW 1.1 for the Cosmos 3 release). Generated videos and latents live under
+   `data/` and are gitignored.
 
 ## Role 1: action-conditioned trajectory generator
 
@@ -23,7 +24,7 @@ same start frame, so the output contains **branching futures** that real dataset
 the long-horizon consistency task pairs branches and measures how fast latents diverge.
 
 ```bash
-bash scripts/generate_cosmos3_trajectories.sh --start-frames prompts/frames --actions prompts/actions.json
+bash scripts/generate_cosmos3_trajectories.sh --start-frames prompts/frames --actions prompts/actions.json   # Cosmos3-Nano, droid_lerobot
 # or, to validate the inputs and see the plan without loading a model:
 python -m hyperbolic_world_model.data.cosmos3.generate --start-frames ... --actions ... --dry-run
 ```
@@ -54,27 +55,40 @@ property of the latent spaces, never as a statement about Cosmos's videos.
 
 ## Which Cosmos, and how the model is called
 
-The adapters (`CosmosGenerator`, `CosmosTokenizerBackend`) are written against NVIDIA's
-`cosmos_predict2` package, the public action-conditioned inference API at the commit we read
-(`Video2WorldInference.generate_vid2world(..., action=...)`, chunked exactly as
-`cosmos_predict2/action_conditioned.py` does: first frame real, later frames zero, `chunk_size`
-actions per call, per-chunk seeds, upstream's stitching rule). The checkpoint is selected by the
-`--model` key registered in that package. Today that key is `Cosmos-Predict2.5-2B/robot/action-cond`;
-the Cosmos 3 Nano action-conditioned checkpoint is selected the same way once NVIDIA's package
-registers it. We could not read a Cosmos 3-specific API from the development environment, so the
-adapter's contract is verified against the current public one (`tests/data/test_cosmos3.py`
-replays the chunk loop against a fake `generate_vid2world` and checks call shapes, seeds, zero
-padding and stitching).
+The adapters (`Cosmos3Generator` in `generate.py`, `Cosmos3TokenizerBackend` in `extract_latents.py`)
+are written against NVIDIA's `cosmos-framework` at the commit we read
+(`2b6c9a7061ae78dc83e29a4910ec5f8c9fe4b6ce`, September 2026):
 
-The `cosmos_predict2` package and its GPU stack are **not** dependencies of this repository; install
-them per NVIDIA's setup guide on the generation machine. Everything around the model call (input
-validation, seeding, manifest, latent pooling, the dataset) runs and is tested without it.
+- **Generation** uses the framework's `forward_dynamics` mode
+  (`python -m cosmos_framework.scripts.inference -i samples.jsonl -o out --checkpoint-path Cosmos3-Nano`).
+  One sample is an observation image, a JSON action file (rows of raw per-domain actions), a
+  `domain_name` (`droid_lerobot`: 10-D `[pos_delta (3), rot6d_delta (6), gripper (1)]`), an
+  `action_chunk_size`, an `image_size` bucket (256 or 480), `fps`, `view_point`, the text `prompt`
+  and a `seed`; the framework writes `<name>/vision.mp4` with `action_chunk_size + 1` frames, the
+  first being the observation (`cosmos_framework/inference/action.py::build_action_batch`).
+  Longer action sequences are rolled out autoregressively: the last generated frame becomes the
+  next observation. Every chunk level of every rollout is batched into one JSONL, so the model is
+  loaded once per chunk level; per-chunk seeds are the branch seed plus the level. Chunks are
+  stitched so that frame `t + 1` is the result of action `t`. `chunk_size` must be a multiple of 4
+  because the tokenizer needs `4n + 1` frames.
+- **Latents** come from the Cosmos 3 vision tokenizer, a causal Wan 2.2 VAE with 4x temporal and
+  16x spatial compression, through the model's `encode` on a `(1, 3, T, H, W)` video in `[-1, 1]`
+  with `T = 4n + 1`; the adapter pads `T` and crops `H`, `W` to multiples of 16. The decoder is
+  never used.
+
+`tests/data/test_cosmos3.py` replays the chunk loop against a fake framework runner and checks
+sample construction, batching per level, zero padding, per-chunk seeds, chaining and stitching, and
+the tokenizer backend's padding, cropping and value range. The framework itself, its GPU stack and
+`ffmpeg` (its prerequisite, which we also use to read and write mp4) are **not** dependencies of
+this repository; install them per NVIDIA's setup guide on the generation machine. Everything around
+the model call (input validation, seeding, manifest, latent pooling, the dataset) runs and is
+tested without them.
 
 ## Reproducibility of generation
 
 Every rollout's `meta.json` and manifest line record the prompt id, branch id, per-branch seed
-(derived deterministically from `--seed`, the prompt id and the branch id), the model key, checkpoint
-path, sampler settings and timestamp. Re-running with the same inputs regenerates identical
+(derived deterministically from `--seed`, the prompt id and the branch id; each chunk adds its
+level), the checkpoint, domain, chunk size, image size, sampler settings and timestamp. Re-running with the same inputs regenerates identical
 rollouts; `--overwrite` forces it, otherwise already-generated rollouts are skipped.
 
 ## Status

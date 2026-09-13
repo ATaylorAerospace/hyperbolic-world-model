@@ -12,8 +12,8 @@ data/
 │   └── episodes/               # one shard per episode: frames + 7-DoF actions
 ├── cosmos3_prompts/            # your generation inputs (any location; passed to generate.py)
 │   ├── frames/                 # start frames: <prompt_id>.png|.jpg|.npy (H, W, 3) uint8
-│   └── actions.json            # {"action_dim": 7, "prompts": [{prompt_id, start_frame, embodiment, task,
-│                               #   branches: [{branch_id, primitive, actions: [[7 floats], ...]}]}]}
+│   └── actions.json            # {"action_dim": 10, "prompts": [{prompt_id, start_frame, embodiment, task, prompt,
+│                               #   branches: [{branch_id, primitive, actions: [[10 floats: droid_lerobot], ...]}]}]}
 ├── cosmos3_generated/          # written by generate.py / extract_latents.py
 │   ├── rollouts/<prompt_id>/<branch_id>/{frames.npz, meta.json, rollout.mp4?}
 │   ├── latents/<prompt_id>/<branch_id>.npz

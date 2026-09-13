@@ -14,7 +14,7 @@ source under the upstream terms.
 | DINOv2 (code) | Frozen image encoder for the DINO-WM subject | Apache 2.0 | https://github.com/facebookresearch/dinov2 |
 | Hydra / OmegaConf | Configuration and sweeps | Apache 2.0 (Hydra), BSD-3 (OmegaConf) | https://github.com/facebookresearch/hydra |
 | transformers | Loading DINOv2 from the Hugging Face Hub | Apache 2.0 | https://github.com/huggingface/transformers |
-| cosmos_predict2 (NVIDIA, not a dependency; installed separately on the generation machine) | Action-conditioned generation and tokenizer latents, inference only | Apache 2.0 | https://github.com/nvidia-cosmos/cosmos-predict2.5 |
+| cosmos-framework (NVIDIA, not a dependency; installed separately on the generation machine) | Cosmos 3 Nano forward-dynamics generation and vision-VAE latents, inference only | Apache 2.0 | https://github.com/nvidia/cosmos-framework |
 | timm (optional `vjepa2` extra) | Required by the upstream vjepa2 code that torch.hub imports for the V-JEPA 2-AC loader | Apache 2.0 | https://github.com/huggingface/pytorch-image-models |
 | PyTorch | Tensors and autograd | BSD-3 | https://github.com/pytorch/pytorch |
 | einops, numpy, pandas, matplotlib, huggingface_hub | Utilities | MIT / BSD-3 / BSD-3 / PSF-based / Apache 2.0 | respective repositories |
@@ -25,7 +25,7 @@ source under the upstream terms.
 |---|---|---|---|
 | V-JEPA 2-AC ViT-g (`vjepa2_ac_vit_giant` via torch.hub, `vjepa2-ac-vitg.pt`) | Frozen encoder for every head; Meta's bundled predictor kept frozen as the reference Euclidean baseline; our heads are trained from scratch | Per the upstream release (code MIT) | No |
 | DINOv2 base (`facebook/dinov2-base`) | Frozen encoder for the DINO-WM subject | Apache 2.0 | No |
-| NVIDIA Cosmos 3 Nano (`nvidia/Cosmos-3-Nano`) | Inference only: trajectory generation and tokenizer latents for hyperbolicity probing. Never fine-tuned, never modified. | NVIDIA Open Model Licence / OpenMDW 1.1 (gated; accept on the Hub) | No |
+| NVIDIA Cosmos 3 Nano (`nvidia/Cosmos3-Nano`) | Inference only: forward-dynamics trajectory generation and vision-VAE latents for hyperbolicity probing. Never fine-tuned, never modified. | OpenMDW 1.1 (accept on the Hub) | No |
 
 If you redistribute a trained predictor head from this repository, it contains none of the
 upstream weights (only the head's own parameters) and is covered by this repository's Apache 2.0

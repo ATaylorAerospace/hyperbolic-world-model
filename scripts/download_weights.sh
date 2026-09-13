@@ -5,7 +5,8 @@
 #   V-JEPA 2-AC  vjepa2_ac_vit_giant via torch.hub (MIT code; weights from dl.fbaipublicfiles.com)
 #                needs the `vjepa2` extra (timm, an upstream hub dependency): uv sync --extra vjepa2
 #   DINOv2     facebook/dinov2-base             (Apache 2.0)
-#   Cosmos 3   nvidia/Cosmos-3-Nano              (OpenMDW 1.1, gated: accept terms on the Hub first)
+#   Cosmos 3   nvidia/Cosmos3-Nano               (OpenMDW 1.1: accept terms on the Hub first; cosmos-framework
+#              also fetches it on first use via --checkpoint-path Cosmos3-Nano)
 #
 # Usage: bash scripts/download_weights.sh [vjepa2|dinov2|cosmos3|all]
 set -euo pipefail
@@ -43,11 +44,11 @@ PYX
 case "$TARGET" in
   vjepa2) dl_vjepa2_ac ;;
   dinov2) dl facebook/dinov2-base dinov2 ;;
-  cosmos3) dl nvidia/Cosmos-3-Nano cosmos3-nano ;;
+  cosmos3) dl nvidia/Cosmos3-Nano cosmos3-nano ;;
   all)
     dl_vjepa2_ac
     dl facebook/dinov2-base dinov2
-    dl nvidia/Cosmos-3-Nano cosmos3-nano
+    dl nvidia/Cosmos3-Nano cosmos3-nano
     ;;
   *) echo "unknown target: $TARGET (vjepa2|dinov2|cosmos3|all)" >&2; exit 2 ;;
 esac

@@ -1,11 +1,12 @@
-"""NVIDIA Cosmos as a data generator and a latent-space probe target.
+"""NVIDIA Cosmos 3 (Nano) as a data generator and a latent-space probe target.
 
 Cosmos is **never fine-tuned, never modified, and its generation quality is never reported as a
 result** (see ``docs/cosmos3_usage.md``). Two inference-only uses:
 
-1. :mod:`generate` - batch script turning (start frame, action sequence) into a video rollout,
-   producing controlled trajectories with branching futures.
-2. :mod:`extract_latents` - pull the Cosmos video tokenizer's latents so
+1. :mod:`generate` - batch script turning (start frame, action sequence) into a video rollout with
+   Cosmos 3 Nano's ``forward_dynamics`` mode (NVIDIA cosmos-framework), producing controlled
+   trajectories with branching futures.
+2. :mod:`extract_latents` - pull Cosmos 3's vision-VAE latents so
    :mod:`hyperbolic_world_model.metrics.gromov_hyperbolicity` can probe them.
 
 :mod:`dataset` loads the generated trajectories in the shared batch format for the

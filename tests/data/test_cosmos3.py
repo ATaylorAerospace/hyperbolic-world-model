@@ -1,8 +1,8 @@
 """Cosmos generation pipeline, latent extraction and dataset, exercised end to end with fakes.
 
-No model is loaded. A deterministic fake world model stands in for the NVIDIA adapter's client so
-the adapter's chunking, padding, seeding and stitching logic (which mirrors upstream) is verified
-against the ``generate_vid2world`` contract it was written for.
+No model is loaded. A fake runner stands in for NVIDIA's cosmos-framework CLI so the Cosmos 3
+adapter's sample construction, wavefront chunking, padding, seeding and stitching are verified
+against the ``forward_dynamics`` contract it was written for.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from hyperbolic_world_model.data import build_dataset
 from hyperbolic_world_model.data.cosmos3 import default_root, generate as g
 from hyperbolic_world_model.data.cosmos3.dataset import Cosmos3TrajectoryDataset
 from hyperbolic_world_model.data.cosmos3.extract_latents import (
-    CosmosTokenizerBackend,
+    Cosmos3TokenizerBackend,
     extract_latents,
     load_latents,
     pool_latent,
@@ -26,8 +26,8 @@ from hyperbolic_world_model.data.cosmos3.extract_latents import (
 from hyperbolic_world_model.data.cosmos3.extract_latents import main as extract_main
 from hyperbolic_world_model.data.hierarchies import build_hierarchy
 
-H = W = 16
-A = 7
+H = W = 32
+A = 10
 
 
 class FakeGenerator:
@@ -78,6 +78,7 @@ def prompt_dir(tmp_path: Path) -> tuple[Path, Path]:
                 "start_frame": f"{pid}.{'npy' if pid == 'ep3' else 'png'}",
                 "embodiment": emb,
                 "task": task,
+                **({"prompt": "Pick up the cup."} if pid == "ep0" else {}),
                 "branches": [
                     {"branch_id": "b0", "primitive": "reach", "actions": rng.normal(size=(6, A)).tolist(), "note": "x"},
                     {"branch_id": "b1", "primitive": "grasp", "actions": rng.normal(size=(9, A)).tolist()},
@@ -97,6 +98,7 @@ def test_load_action_spec_validates(prompt_dir: tuple[Path, Path], tmp_path: Pat
     prompts = g.load_action_spec(spec_path, frames_dir)
     assert [p.prompt_id for p in prompts] == ["ep0", "ep1", "ep2", "ep3"]
     assert prompts[0].branches[0].actions.shape == (6, A) and prompts[0].branches[0].extra == {"note": "x"}
+    assert prompts[0].text == "Pick up the cup." and prompts[1].text == "place"  # falls back to the task label
     assert g.load_start_frame(prompts[0].start_frame_path).shape == (H, W, 3)
     assert g.load_start_frame(prompts[3].start_frame_path).dtype == np.uint8
     spec = json.loads(spec_path.read_text())
@@ -180,56 +182,124 @@ def test_default_root_follows_data_root(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert default_root("/x") == Path("/x/cosmos3_generated")
 
 
-# ---------------------------------------------------------------------------- NVIDIA adapter logic
-class FakeVideo2World:
-    """Mimics ``Video2WorldInference.generate_vid2world``: records calls, returns a video in [-1, 1]."""
+# ---------------------------------------------------------------------------- Cosmos 3 adapter logic
+class FakeFrameworkRunner:
+    """Mimics ``Cosmos3Generator.run_framework``: records the samples it was given and returns
+    ``chunk_size + 1`` frames per sample, the first being the observation image, the rest brightened
+    by the first action component so chaining and stitching are observable."""
 
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
+    def __init__(self, extra_frames: int = 0) -> None:
+        self.calls: list[list[dict]] = []
+        self.extra_frames = extra_frames
 
-    def generate_vid2world(self, **kw):  # noqa: ANN003, ANN202
-        self.calls.append(kw)
-        vid = kw["input_path"]  # (B, C, T, H, W) uint8
-        b, c, t, h, w = vid.shape
-        first = vid[:, :, :1].float() / 127.5 - 1  # (B, C, 1, H, W)
-        step = kw["action"][:, 0].view(1, 1, -1, 1, 1) * 0.1  # (1, 1, T-1, 1, 1)
-        frames = first + torch.cumsum(step, dim=2)
-        return torch.cat([first, frames], dim=2).clamp(-1, 1)
+    def __call__(self, samples: list[dict], work_dir: Path) -> dict[str, np.ndarray]:
+        from PIL import Image
 
-
-def test_cosmos_generator_reproduces_upstream_chunk_loop() -> None:
-    client = FakeVideo2World()
-    gen = g.CosmosGenerator(chunk_size=4, guidance=5.0, num_steps=3, client=client)
-    start = np.full((H, W, 3), 100, dtype=np.uint8)
-    actions = np.ones((10, A), dtype=np.float32)  # 10 actions -> chunks of 4, 4, 2 (padded to 4)
-    video = gen.generate(start, actions, seed=7)
-    assert video.shape == (11, H, W, 3) and video.dtype == np.uint8
-    assert np.array_equal(video[0], start)
-    assert len(client.calls) == 3
-    for i, call in enumerate(client.calls):
-        assert call["input_path"].shape == (1, 3, 5, H, W) and call["input_path"].dtype == torch.uint8
-        assert torch.all(call["input_path"][:, :, 1:] == 0)  # only the first frame is real
-        assert call["action"].shape == (4, A) and call["num_video_frames"] == 5
-        assert call["seed"] == 7 + 4 * i and call["guidance"] == 5.0 and call["num_steps"] == 3
-        assert call["num_latent_conditional_frames"] == 1 and call["prompt"] == ""
-    assert torch.all(client.calls[2]["action"][2:] == 0)  # zero padding of the last chunk
-    # Each chunk starts from the previous chunk's last generated frame.
-    assert np.array_equal(client.calls[1]["input_path"][0, :, 0].permute(1, 2, 0).numpy(), video[4])
-    # Brightness increases monotonically with the constant positive action: no duplicated boundary frame
-    # (which upstream's preview stitching would produce) and no dropped frame.
-    means = video.astype(np.float32).mean(axis=(1, 2, 3))
-    assert np.all(np.diff(means) > 0)
-    assert gen.model_info["chunk_size"] == 4 and gen.model_info["model"] == g.DEFAULT_MODEL
-    with pytest.raises(ValueError):
-        gen.generate(start.astype(np.float32), actions, 0)
-    with pytest.raises(ValueError):
-        g.CosmosGenerator(chunk_size=0)
+        self.calls.append(samples)
+        out = {}
+        for s in samples:
+            assert s["model_mode"] == "forward_dynamics"
+            img = np.asarray(Image.open(s["vision_path"]).convert("RGB"))
+            actions = np.asarray(json.loads(Path(s["action_path"]).read_text()), dtype=np.float32)
+            assert actions.shape == (s["action_chunk_size"], A)
+            frames = [img]
+            cur = img.astype(np.float32)
+            for a in actions:
+                cur = np.clip(cur + 8 * a[0], 0, 255)
+                frames.append(cur.astype(np.uint8))
+            frames += [frames[-1]] * self.extra_frames
+            out[s["name"]] = np.stack(frames)
+        return out
 
 
-def test_cosmos_generator_without_package_gives_actionable_error() -> None:
-    gen = g.CosmosGenerator()
-    with pytest.raises(RuntimeError, match="cosmos_predict2 package is not installed"):
-        _ = gen.client
+def test_cosmos3_generator_wavefront_chunking_samples_and_stitching(tmp_path: Path) -> None:
+    runner = FakeFrameworkRunner(extra_frames=3)
+    gen = g.Cosmos3Generator(chunk_size=4, image_size=256, fps=5, num_steps=7, guidance=2.5, work_dir=tmp_path / "w", runner=runner)
+    start_a = np.full((H, W, 3), 50, dtype=np.uint8)
+    start_b = np.full((H, W, 3), 90, dtype=np.uint8)
+    jobs = [
+        g.RolloutJob("ep0/b0", start_a, np.ones((10, A), np.float32), seed=100, text="pick"),  # 3 chunks (4, 4, 2+pad)
+        g.RolloutJob("ep0/b1", start_a, np.ones((4, A), np.float32), seed=200),  # 1 chunk
+        g.RolloutJob("ep1/b0", start_b, np.ones((5, A), np.float32), seed=300),  # 2 chunks (4, 1+pad)
+    ]
+    videos = gen.generate_batch(jobs)
+    assert {k: v.shape for k, v in videos.items()} == {"ep0/b0": (11, H, W, 3), "ep0/b1": (5, H, W, 3), "ep1/b0": (6, H, W, 3)}
+    # One framework invocation per chunk level; each level batches every active rollout.
+    assert [len(c) for c in runner.calls] == [3, 2, 1]
+    s0 = runner.calls[0][0]
+    assert s0["name"] == "ep0_b0_c000" and s0["domain_name"] == "droid_lerobot" and s0["action_chunk_size"] == 4
+    assert s0["image_size"] == 256 and s0["fps"] == 5 and s0["view_point"] == "ego_view" and s0["prompt"] == "pick"
+    assert s0["seed"] == 100 and s0["num_steps"] == 7 and s0["guidance"] == 2.5
+    assert runner.calls[1][0]["seed"] == 101 and runner.calls[2][0]["seed"] == 102  # per-chunk seeds
+    assert runner.calls[0][1]["prompt"] == ""  # no text given
+    # Frame t + 1 is the result of action t: monotone brightness, no duplicated boundary frame.
+    means = videos["ep0/b0"].astype(np.float32).mean(axis=(1, 2, 3))
+    assert np.array_equal(videos["ep0/b0"][0], start_a) and np.all(np.diff(means) > 0)
+    # The last chunk of ep1/b0 was zero-padded to 4 actions; padded frames are dropped.
+    last_actions = json.loads(Path(runner.calls[1][1]["action_path"]).read_text())
+    assert runner.calls[1][1]["name"] == "ep1_b0_c001" and last_actions[1:] == [[0.0] * A] * 3
+    # Each later chunk is conditioned on the previous chunk's last frame.
+    from PIL import Image
+
+    cond = np.asarray(Image.open(runner.calls[1][0]["vision_path"]).convert("RGB"))
+    assert np.array_equal(cond, videos["ep0/b0"][4])
+    assert gen.model_info["model"] == "Cosmos3-Nano" and gen.model_info["chunk_size"] == 4
+    assert gen.generate(start_a, np.ones((3, A), np.float32), 1).shape == (4, H, W, 3)
+
+
+def test_cosmos3_generator_validation_and_command() -> None:
+    with pytest.raises(ValueError, match="multiple of 4"):
+        g.Cosmos3Generator(chunk_size=6)
+    gen = g.Cosmos3Generator(runner=lambda s, d: {}, work_dir="/tmp/unused", guardrails=False, python="py3")
+    cmd = gen.framework_command(Path("s.jsonl"), Path("out"))
+    assert cmd[:3] == ["py3", "-m", "cosmos_framework.scripts.inference"] and "--no-guardrails" in cmd
+    assert cmd[cmd.index("--checkpoint-path") + 1] == "Cosmos3-Nano"
+    assert "--no-guardrails" not in g.Cosmos3Generator(guardrails=True).framework_command(Path("s"), Path("o"))
+    with pytest.raises(ValueError, match="uint8"):
+        gen.generate_batch([g.RolloutJob("k", np.zeros((H, W, 3), np.float32), np.ones((4, A), np.float32), 0)])
+    with pytest.raises(ValueError, match="unique"):
+        gen.generate_batch([g.RolloutJob("k", np.zeros((H, W, 3), np.uint8), np.ones((4, A), np.float32), 0)] * 2)
+    short = FakeFrameworkRunner()
+    gen2 = g.Cosmos3Generator(chunk_size=8, runner=lambda s, d: {k: v[:5] for k, v in short(s, d).items()})
+    with pytest.raises(RuntimeError, match="expected >= 9"):
+        gen2.generate(np.zeros((H, W, 3), np.uint8), np.ones((8, A), np.float32), 0)
+
+
+def test_run_framework_without_the_package_raises_actionable_error(tmp_path: Path) -> None:
+    gen = g.Cosmos3Generator(work_dir=tmp_path, python=".venv/bin/python")
+    sample = gen.make_sample("s", tmp_path / "i.png", tmp_path / "a.json", 0, "")
+    assert sample["model_mode"] == "forward_dynamics" and "num_steps" not in sample
+    with pytest.raises(RuntimeError, match="cosmos_framework inference failed"):
+        gen.run_framework([sample], tmp_path)
+
+
+@pytest.mark.skipif(g.ffmpeg_available(), reason="ffmpeg present; the no-ffmpeg paths are exercised elsewhere")
+def test_video_helpers_without_ffmpeg(tmp_path: Path) -> None:
+    frames = np.zeros((5, H, W, 3), np.uint8)
+    assert g.write_video_ffmpeg(tmp_path / "x.mp4", frames, 5) is None
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        g.read_video_ffmpeg(tmp_path / "x.mp4")
+
+
+@pytest.mark.skipif(not g.ffmpeg_available(), reason="needs ffmpeg")
+def test_video_helpers_round_trip_with_ffmpeg(tmp_path: Path) -> None:
+    frames = np.random.default_rng(0).integers(0, 255, size=(9, H, W, 3), dtype=np.uint8)
+    path = g.write_video_ffmpeg(tmp_path / "x.mp4", frames, 5)
+    assert path is not None and path.exists()
+    back = g.read_video_ffmpeg(path)
+    assert back.shape == frames.shape and np.abs(back.astype(int) - frames.astype(int)).mean() < 12  # lossy
+
+
+def test_generate_rollouts_uses_the_batch_path(prompt_dir: tuple[Path, Path], tmp_path: Path) -> None:
+    frames_dir, spec_path = prompt_dir
+    runner = FakeFrameworkRunner()
+    gen = g.Cosmos3Generator(chunk_size=4, work_dir=tmp_path / "w", runner=runner)
+    records = g.generate_rollouts(g.load_action_spec(spec_path, frames_dir), gen, tmp_path / "gen", write_mp4=False)
+    assert len(records) == 8 and records[0]["model_info"]["model"] == "Cosmos3-Nano"
+    assert [len(c) for c in runner.calls] == [8, 8, 4]  # 6-action branches need 2 chunks, 9-action ones need 3
+    assert runner.calls[0][0]["prompt"] == "Pick up the cup." and runner.calls[0][2]["prompt"] == "place"
+    with np.load(tmp_path / "gen" / records[1]["frames_path"]) as z:
+        assert z["frames"].shape == (10, H, W, 3)
 
 
 # ---------------------------------------------------------------------------- latents
@@ -263,23 +333,32 @@ def test_pool_latent_and_extract(prompt_dir: tuple[Path, Path], tmp_path: Path) 
     assert len(extract_main(["--root", str(out), "--overwrite"], backend=FakeTokenizer())) == 8
 
 
-def test_tokenizer_backend_encodes_through_client_tokenizer() -> None:
-    class Tok:
+def test_cosmos3_tokenizer_backend_prepares_and_encodes() -> None:
+    class Model:
         def encode(self, x):  # noqa: ANN001, ANN202
-            assert x.shape[:2] == (1, 3) and x.dtype == torch.bfloat16
+            assert x.shape[:2] == (1, 3) and x.dtype == torch.bfloat16 and (x.shape[2] - 1) % 4 == 0
+            assert x.shape[3] % 16 == 0 and x.shape[4] % 16 == 0
             assert float(x.float().min()) >= -1 and float(x.float().max()) <= 1
-            return x[:, :, ::4, ::8, ::8].float()
+            return x[:, :, ::4, ::16, ::16].float()
 
-    class Client:
-        class model:  # noqa: N801
-            tokenizer = Tok()
-
-    be = CosmosTokenizerBackend(client=Client())
-    video = np.random.default_rng(0).integers(0, 255, size=(9, H, W, 3), dtype=np.uint8)
+    be = Cosmos3TokenizerBackend(model=Model(), device="cpu")
+    video = np.random.default_rng(0).integers(0, 255, size=(7, 40, 50, 3), dtype=np.uint8)  # T=7 -> pad to 9; crop to 32x48
+    prepared = be.prepare(video)
+    assert prepared.shape == (9, 32, 48, 3) and np.array_equal(prepared[7], prepared[6])
     lat = be.encode(video)
-    assert lat.shape == (3, 3, H // 8, W // 8) and lat.dtype == np.float32
+    assert lat.shape == (3, 3, 2, 3) and lat.dtype == np.float32
+    assert be.model_info["model"] == "Cosmos3-Nano"
     with pytest.raises(ValueError):
         be.encode(video.astype(np.float32))
+    with pytest.raises(ValueError, match="too small"):
+        be.prepare(np.zeros((5, 8, 8, 3), np.uint8))
+
+
+def test_load_cosmos3_model_without_framework_raises_actionable_error() -> None:
+    from hyperbolic_world_model.data.cosmos3.extract_latents import load_cosmos3_model
+
+    with pytest.raises(RuntimeError, match="cosmos-framework is not installed"):
+        load_cosmos3_model("Cosmos3-Nano")
 
 
 # ---------------------------------------------------------------------------- dataset

@@ -11,14 +11,15 @@ and ``meta`` (JSON). The manifest is rewritten with ``latents_path`` filled in.
 
 These latents answer a question independent of any head we train: *does a large generative world
 model already organise its latent space in a tree-like way?* (:mod:`metrics.gromov_hyperbolicity`).
-The tokenizer output is a latent video ``(C, T', H', W')`` with 4x temporal and 8x spatial
-compression for the Cosmos-Predict2.5 tokenizer; ``pooling="mean"`` averages the spatial grid to
-``(T', C)``, ``pooling="flatten"`` keeps it as ``(T', C * H' * W')``.
+Cosmos 3's vision tokenizer is a causal Wan 2.2 VAE with 4x temporal and 16x spatial compression
+(``cosmos_framework/model/generator/tokenizers/wan2pt2_vae_4x16x16.py``): ``model.encode(x)`` on a
+``(1, 3, T, H, W)`` video in ``[-1, 1]`` with ``T = 4n + 1`` returns ``(1, z, 1 + (T - 1) // 4, H/16, W/16)``.
+``pooling="mean"`` averages the spatial grid to ``(T', z)``, ``pooling="flatten"`` keeps it as
+``(T', z * H' * W')``.
 
-The model call is isolated in :class:`CosmosTokenizerBackend`, which reaches the tokenizer through
-the same ``Video2WorldInference`` object as generation (``model.tokenizer.encode`` on a
-``(1, 3, T, H, W)`` tensor in ``[-1, 1]``, per ``cosmos_predict2``'s tokenizer interface). Everything
-else is numpy and is tested with a fake backend.
+The model call is isolated in :class:`Cosmos3TokenizerBackend`: it pads ``T`` to ``4n + 1`` by
+repeating the last frame, crops ``H`` and ``W`` to multiples of 16, and calls the model's ``encode``
+(the decoder is never used). Everything else is numpy and is tested with a fake backend.
 """
 
 from __future__ import annotations
@@ -44,34 +45,81 @@ class TokenizerBackend(Protocol):
         ...
 
 
-class CosmosTokenizerBackend:
-    """Adapter over the tokenizer bundled with NVIDIA's ``cosmos_predict2`` models (encoder only)."""
+class Cosmos3TokenizerBackend:
+    """Adapter over the vision VAE bundled with a Cosmos 3 checkpoint (encoder only).
 
-    def __init__(self, model: str = DEFAULT_MODEL, checkpoint_path: str | None = None, client: Any | None = None) -> None:
-        self.model = model
-        self.checkpoint_path = checkpoint_path
-        self._client = client
-        self.model_info = {"backend": "cosmos_predict2 tokenizer.encode", "model": model, "checkpoint_path": checkpoint_path}
+    Args:
+        checkpoint: ``--checkpoint-path`` value used to build the pipeline (``Cosmos3-Nano``).
+        model: an object with ``encode(x)`` (tests inject a fake); built lazily from
+            ``cosmos_framework`` otherwise via :func:`load_cosmos3_model`.
+        device: where the input video is sent.
+    """
+
+    def __init__(self, checkpoint: str = DEFAULT_MODEL, model: Any | None = None, device: str | None = None) -> None:
+        self.checkpoint = checkpoint
+        self._model = model
+        self.device = device
+        self.model_info = {"backend": "cosmos_framework OmniMoTModel.encode (Wan2.2 VAE 4x16x16)", "model": checkpoint}
 
     @property
-    def client(self) -> Any:
-        if self._client is None:
-            from hyperbolic_world_model.data.cosmos3.generate import CosmosGenerator
+    def model(self) -> Any:
+        if self._model is None:
+            self._model = load_cosmos3_model(self.checkpoint)
+        return self._model
 
-            self._client = CosmosGenerator(model=self.model, checkpoint_path=self.checkpoint_path).client
-        return self._client
+    @staticmethod
+    def prepare(video: np.ndarray) -> np.ndarray:
+        """Pad ``T`` to ``4n + 1`` (repeat last frame) and crop ``H``, ``W`` to multiples of 16."""
+        if video.ndim != 4 or video.dtype != np.uint8:
+            raise ValueError("video must be (T, H, W, 3) uint8")
+        t, h, w, _ = video.shape
+        h16, w16 = h - h % 16, w - w % 16
+        if h16 < 16 or w16 < 16:
+            raise ValueError(f"video too small for a 16x spatial VAE: {(h, w)}")
+        video = video[:, :h16, :w16]
+        pad = (-(t - 1)) % 4
+        if pad:
+            video = np.concatenate([video, np.repeat(video[-1:], pad, axis=0)], axis=0)
+        return video
 
     def encode(self, video: np.ndarray) -> np.ndarray:
         import torch
 
-        if video.ndim != 4 or video.dtype != np.uint8:
-            raise ValueError("video must be (T, H, W, 3) uint8")
-        tokenizer = self.client.model.tokenizer
+        video = self.prepare(video)
+        device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
         x = torch.from_numpy(np.ascontiguousarray(video)).permute(3, 0, 1, 2).unsqueeze(0)  # (1, 3, T, H, W)
-        x = (x.float() / 127.5 - 1.0).to(device="cuda" if torch.cuda.is_available() else "cpu", dtype=torch.bfloat16)
+        x = (x.float() / 127.5 - 1.0).to(device=device, dtype=torch.bfloat16)
         with torch.no_grad():
-            latent = tokenizer.encode(x)  # (1, C, T', H', W')
+            latent = self.model.encode(x)  # (1, z, T', H', W')
         return latent[0].float().cpu().numpy()
+
+
+def load_cosmos3_model(checkpoint: str, work_dir: str | Path | None = None) -> Any:
+    """Build the framework pipeline for ``checkpoint`` and return its model (which owns the VAE).
+
+    Mirrors ``cosmos_framework/scripts/inference.py`` at the pinned commit: setup overrides ->
+    ``build_setup()`` -> ``get_inference_cls().create(setup)``; the model exposes ``encode``
+    (``OmniMoTModel.encode`` -> ``tokenizer_vision_gen.encode``). Not exercised in this repository's
+    tests (requires the framework and a GPU).
+    """
+    try:
+        from cosmos_framework.inference.args import OmniSetupOverrides  # type: ignore[import-not-found]
+        from cosmos_framework.inference.common.init import init_output_dir  # type: ignore[import-not-found]
+    except ImportError as e:
+        raise RuntimeError(
+            "NVIDIA's cosmos-framework is not installed; it is not a dependency of hyperbolic-world-model. "
+            "Install it per https://github.com/nvidia/cosmos-framework (GPU required) before extracting latents."
+        ) from e
+    import tempfile
+
+    out = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="cosmos3_latents_"))
+    setup = OmniSetupOverrides.model_construct(checkpoint_path=checkpoint, output_dir=out, guardrails=False).build_setup()
+    init_output_dir(setup.output_dir)
+    pipe = setup.get_inference_cls().create(setup)
+    model = getattr(pipe, "model", None)
+    if model is None or not hasattr(model, "encode"):
+        raise RuntimeError("cosmos-framework pipeline exposes no model.encode; the framework API may have changed")
+    return model
 
 
 def pool_latent(latent: np.ndarray, pooling: str = "mean") -> np.ndarray:
@@ -142,8 +190,7 @@ def extract_latents(root: Path, backend: TokenizerBackend, pooling: str = "mean"
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--root", type=Path, default=None, help="generated data root; default $DATA_ROOT/cosmos3_generated")
-    p.add_argument("--model", default=DEFAULT_MODEL)
-    p.add_argument("--checkpoint-path", default=None)
+    p.add_argument("--checkpoint", default=DEFAULT_MODEL, help="cosmos-framework --checkpoint-path (Cosmos3-Nano)")
     p.add_argument("--pooling", choices=["mean", "flatten"], default="mean")
     p.add_argument("--overwrite", action="store_true")
     return p.parse_args(argv)
@@ -152,7 +199,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None, backend: TokenizerBackend | None = None) -> list[Path]:
     args = parse_args(argv)
     root = args.root or default_root()
-    be = backend or CosmosTokenizerBackend(model=args.model, checkpoint_path=args.checkpoint_path)
+    be = backend or Cosmos3TokenizerBackend(checkpoint=args.checkpoint)
     written = extract_latents(root, be, pooling=args.pooling, skip_existing=not args.overwrite)
     print(f"wrote {len(written)} latent files under {Path(root) / 'latents'}")
     return written
@@ -162,9 +209,10 @@ if __name__ == "__main__":
     main()
 
 __all__ = [
-    "CosmosTokenizerBackend",
+    "Cosmos3TokenizerBackend",
     "TokenizerBackend",
     "extract_latents",
+    "load_cosmos3_model",
     "load_latents",
     "main",
     "pool_latent",
