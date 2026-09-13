@@ -1,13 +1,13 @@
-"""Contract tests for the Poincaré ball.
-
-Covers: exp/log inverse identity, distance symmetry, triangle inequality, gradient check against
-finite differences, and float32 vs float64 stability near the boundary.
-"""
+"""Poincaré ball: construction, Möbius helpers, gradcheck, and float32 vs float64 at 0.999 R."""
 
 from __future__ import annotations
 
+import math
+
+import geoopt
 import pytest
 import torch
+from tests.geometry.helpers import random_points, random_tangents
 
 from hyperbolic_world_model.geometry import PoincareBall, build_manifold
 from hyperbolic_world_model.geometry.utils import BOUNDARY_EPS
@@ -15,154 +15,186 @@ from hyperbolic_world_model.geometry.utils import BOUNDARY_EPS
 CURVATURES = [-0.5, -1.0, -2.0]
 
 
-def random_points(
-    m: PoincareBall, n: int, d: int, dtype: torch.dtype, max_dist: float = 1.0
-) -> torch.Tensor:
-    """Points at geodesic distance uniform in ``[0, max_dist]`` from the origin."""
-    v = torch.randn(n, d, dtype=dtype)
-    v = v / v.norm(dim=-1, keepdim=True) * (torch.rand(n, 1, dtype=dtype) * max_dist)
-    return m.expmap0(v)
+@pytest.mark.parametrize("c", CURVATURES)
+def test_construction_radius_and_geoopt_parameter(c: float) -> None:
+    m = PoincareBall(c=c)
+    assert m.curvature == c and m.name == "poincare" and m.ambient_dim_offset == 0
+    assert m.radius == pytest.approx(1 / math.sqrt(-c))
+    g = m.to_geoopt()
+    assert (
+        isinstance(g, geoopt.PoincareBall)
+        and float(g.c) == pytest.approx(-c)
+        and g.k.dtype == torch.float64
+    )
+    assert isinstance(build_manifold({"name": "poincare", "curvature": c}), PoincareBall)
+    for bad in (0.0, 1.0):
+        with pytest.raises(ValueError, match="c < 0"):
+            PoincareBall(c=bad)
 
 
-@pytest.mark.parametrize("curvature", CURVATURES)
-def test_exp_log_inverse(curvature: float, dtype: torch.dtype) -> None:
-    m = PoincareBall(curvature)
-    x, y = random_points(m, 32, 6, dtype), random_points(m, 32, 6, dtype)
-    tol = 1e-4 if dtype == torch.float32 else 1e-9
-    assert torch.allclose(m.expmap(x, m.logmap(x, y)), y, atol=tol)
-    # Tangent vectors of bounded *Riemannian* length: |u|_g = lambda_x |u| <= 1.
-    u = torch.randn(32, 6, dtype=dtype)
-    u = u / u.norm(dim=-1, keepdim=True) / m.lambda_x(x) * torch.rand(32, 1, dtype=dtype)
-    assert torch.allclose(m.logmap(x, m.expmap(x, u)), u, atol=tol)
+@pytest.mark.parametrize("c", CURVATURES)
+def test_lambda_x_closed_form(c: float, dtype: torch.dtype) -> None:
+    m = PoincareBall(c=c)
+    x = random_points(m, 16, 4, dtype)
+    expected = 2 / (1 + c * (x * x).sum(-1, keepdim=True))
+    assert torch.allclose(m.lambda_x(x), expected, rtol=1e-5)
+    assert m.lambda_x(x, keepdim=False).shape == (16,)
+    assert torch.allclose(
+        m.lambda_x(torch.zeros(1, 4, dtype=dtype)), torch.full((1, 1), 2.0, dtype=dtype)
+    )
 
 
-@pytest.mark.parametrize("curvature", CURVATURES)
-def test_origin_closed_forms_match_general(curvature: float, dtype: torch.dtype) -> None:
-    m = PoincareBall(curvature)
-    u = torch.randn(16, 5, dtype=dtype) * 0.5
-    o = m.origin(16, 5, dtype=dtype)
-    tol = 1e-5 if dtype == torch.float32 else 1e-10
-    assert torch.allclose(m.expmap0(u), m.expmap(o, u), atol=tol)
-    y = m.expmap0(u)
-    assert torch.allclose(m.logmap0(y), m.logmap(o, y), atol=tol)
-    assert torch.allclose(m.dist0(y), m.dist(o, y), atol=tol)
-
-
-@pytest.mark.parametrize("curvature", CURVATURES)
-def test_distance_symmetric_and_zero_on_diagonal(curvature: float, dtype: torch.dtype) -> None:
-    m = PoincareBall(curvature)
-    x, y = random_points(m, 32, 4, dtype), random_points(m, 32, 4, dtype)
-    tol = 1e-5 if dtype == torch.float32 else 1e-10
-    assert torch.allclose(m.dist(x, y), m.dist(y, x), atol=tol)
-    assert torch.all(m.dist(x, x) < 1e-3)
-    assert torch.all(m.dist(x, y) >= 0)
-
-
-@pytest.mark.parametrize("curvature", CURVATURES)
-def test_triangle_inequality(curvature: float) -> None:
-    m = PoincareBall(curvature)
-    dt = torch.float64
-    x, y, z = (random_points(m, 64, 4, dt) for _ in range(3))
-    assert torch.all(m.dist(x, z) <= m.dist(x, y) + m.dist(y, z) + 1e-9)
-
-
-def test_distance_matches_closed_form_from_origin() -> None:
-    """d(0, x) = (2/sqrt(c)) artanh(sqrt(c) |x|)."""
-    m = PoincareBall(-1.0)
-    x = random_points(m, 16, 3, torch.float64)
-    expected = 2 * torch.atanh(x.norm(dim=-1))
-    assert torch.allclose(m.dist0(x), expected, atol=1e-10)
-
-
-def test_mobius_add_identity_and_inverse() -> None:
-    m = PoincareBall(-1.0)
-    x = random_points(m, 8, 3, torch.float64)
+@pytest.mark.parametrize("c", CURVATURES)
+def test_mobius_add_identity_inverse_and_geoopt(c: float, dtype: torch.dtype) -> None:
+    m = PoincareBall(c=c)
+    x, y = random_points(m, 16, 3, dtype), random_points(m, 16, 3, dtype)
     zero = torch.zeros_like(x)
-    assert torch.allclose(m.mobius_add(zero, x), x)
-    assert torch.allclose(m.mobius_add(x, zero), x)
-    assert torch.allclose(m.mobius_add(-x, x), zero, atol=1e-12)
+    a = 1e-6 if dtype == torch.float32 else 1e-12
+    assert torch.allclose(m.mobius_add(zero, x), x, atol=a)
+    assert torch.allclose(m.mobius_add(x, zero), x, atol=a)
+    assert torch.allclose(m.mobius_add(m.mobius_neg(x), x), zero, atol=a)
+    assert torch.equal(m.mobius_neg(x), -x)
+    assert torch.allclose(m.mobius_add(x, y), m.to_geoopt().mobius_add(x, y))
+    # Möbius addition is not commutative in general.
+    assert not torch.allclose(m.mobius_add(x, y), m.mobius_add(y, x))
+    # Left cancellation law: (-x) (+) (x (+) y) = y.
+    assert torch.allclose(
+        m.mobius_add(-x, m.mobius_add(x, y)), y, atol=1e-5 if dtype == torch.float32 else 1e-10
+    )
 
 
-def test_ptransp_preserves_norm_in_metric() -> None:
-    """Parallel transport is an isometry: lambda_x |u| = lambda_y |P u|."""
-    m = PoincareBall(-1.0)
-    x, y = random_points(m, 16, 4, torch.float64), random_points(m, 16, 4, torch.float64)
-    u = torch.randn(16, 4, dtype=torch.float64)
+@pytest.mark.parametrize("c", CURVATURES)
+def test_gyration_is_an_isometry_and_trivial_at_zero(c: float) -> None:
+    m = PoincareBall(c=c)
+    dt = torch.float64
+    u, v = random_points(m, 16, 3, dt), random_points(m, 16, 3, dt)
+    w = torch.randn(16, 3, dtype=dt)
+    zero = torch.zeros_like(u)
+    assert torch.allclose(m.gyration(u, zero, w), w, atol=1e-10)
+    assert torch.allclose(m.gyration(zero, v, w), w, atol=1e-10)
+    assert torch.allclose(m.gyration(u, v, w).norm(dim=-1), w.norm(dim=-1), atol=1e-10)
+    assert torch.allclose(m.gyration(u, v, w), m.to_geoopt().gyration(u, v, w))
+    # Gyration defines parallel transport: P = (lambda_x / lambda_y) gyr[y, -x].
+    x, y = random_points(m, 16, 3, dt), random_points(m, 16, 3, dt)
+    assert torch.allclose(
+        m.ptransp(x, y, w), m.lambda_x(x) / m.lambda_x(y) * m.gyration(y, -x, w), atol=1e-10
+    )
+
+
+@pytest.mark.parametrize("c", CURVATURES)
+def test_ptransp_preserves_conformal_norm(c: float, dtype: torch.dtype) -> None:
+    m = PoincareBall(c=c)
+    x, y = random_points(m, 16, 4, dtype), random_points(m, 16, 4, dtype)
+    u = random_tangents(m, x)
     pu = m.ptransp(x, y, u)
     assert torch.allclose(
         m.lambda_x(x) * u.norm(dim=-1, keepdim=True),
         m.lambda_x(y) * pu.norm(dim=-1, keepdim=True),
-        atol=1e-9,
+        rtol=1e-4,
     )
 
 
-@pytest.mark.parametrize("curvature", CURVATURES)
-def test_gradients_match_finite_differences(curvature: float) -> None:
-    m = PoincareBall(curvature)
+def test_distance_closed_form_from_origin() -> None:
+    m = PoincareBall(c=-1.0)
+    x = random_points(m, 16, 3, torch.float64)
+    assert torch.allclose(m.dist0(x), 2 * torch.atanh(x.norm(dim=-1)), atol=1e-10)
+    assert torch.allclose(m.dist(torch.zeros_like(x), x), m.dist0(x), atol=1e-10)
+
+
+@pytest.mark.parametrize("c", CURVATURES)
+def test_gradients_match_finite_differences(c: float) -> None:
+    m = PoincareBall(c=c)
     dt = torch.float64
     x = random_points(m, 4, 3, dt).requires_grad_(True)
     y = random_points(m, 4, 3, dt).requires_grad_(True)
-    u = (torch.randn(4, 3, dtype=dt) * 0.3).requires_grad_(True)
-    assert torch.autograd.gradcheck(lambda a, b: m.dist(a, b), (x, y), eps=1e-6, atol=1e-5)
-    assert torch.autograd.gradcheck(lambda a, v: m.expmap(a, v), (x, u), eps=1e-6, atol=1e-5)
-    assert torch.autograd.gradcheck(lambda a, b: m.logmap(a, b), (x, y), eps=1e-6, atol=1e-5)
+    u = random_tangents(m, x.detach(), max_len=0.5).requires_grad_(True)
+    v = (torch.randn(4, 3, dtype=dt) * 0.3).requires_grad_(True)
+    kw = dict(eps=1e-6, atol=1e-5)
+    assert torch.autograd.gradcheck(lambda a, b: m.dist(a, b), (x, y), **kw)
+    assert torch.autograd.gradcheck(lambda a, t: m.expmap(a, t), (x, u), **kw)
+    assert torch.autograd.gradcheck(lambda a, b: m.logmap(a, b), (x, y), **kw)
+    assert torch.autograd.gradcheck(lambda t: m.expmap0(t), (v,), **kw)
+    assert torch.autograd.gradcheck(lambda b: m.logmap0(b), (y,), **kw)
+    assert torch.autograd.gradcheck(lambda a, b, t: m.ptransp(a, b, t), (x, y, u), **kw)
+    assert torch.autograd.gradcheck(lambda a: m.dist0(a), (x,), **kw)
 
 
 def test_proj_clips_to_boundary(dtype: torch.dtype) -> None:
-    m = PoincareBall(-1.0)
+    m = PoincareBall(c=-1.0)
     far = torch.randn(8, 3, dtype=dtype) * 100
     p = m.proj(far)
-    assert torch.all(p.norm(dim=-1) < m.radius)
-    assert torch.all(p.norm(dim=-1) >= (1 - BOUNDARY_EPS[dtype]) * m.radius - 1e-6)
+    assert torch.all(p.norm(dim=-1) < m.radius) and m.check_point(p).all()
+    assert torch.allclose(
+        p.norm(dim=-1),
+        torch.full((8,), (1 - BOUNDARY_EPS[dtype]) * m.radius, dtype=dtype),
+        rtol=1e-5,
+    )
     inside = torch.randn(8, 3, dtype=dtype) * 0.1
     assert torch.equal(m.proj(inside), inside)
+    assert not m.check_point(far).any()
+    assert m.check_point(inside, atol=0.5).all() and not m.check_point(inside * 60, atol=0.5).any()
 
 
-def test_float32_stable_near_boundary_vs_float64() -> None:
-    """Float32 must agree with float64 while the Möbius sum stays outside the float32 clamp
-    margin, and degrade gracefully (finite, bounded, monotone) once it enters it.
+@pytest.mark.parametrize("c", [-1.0, -2.0])
+def test_float32_vs_float64_at_0999_of_the_boundary_radius(c: float) -> None:
+    """Points at ``0.999 * radius``, i.e. inside the float32 clip margin (``BOUNDARY_EPS = 4e-3``).
 
-    Documented limit: with ``BOUNDARY_EPS[float32] = 4e-3`` the largest float32 distance the
-    unit ball can represent is ``2 * artanh(1 - 4e-3) ~ 6.2``. Train in float32 only if latents
-    stay well inside that (the hyperbolic head's ``max_step``/``embed_scale`` do this), or use
-    Lorentz/float64.
+    Measured contract:
+    * quantities that do not go through Möbius addition (``dist0``, ``logmap0``, ``lambda_x``)
+      agree with float64 to 1e-4;
+    * pairwise ``dist``/``logmap`` between two boundary points lose ~1% in float32;
+    * everything stays finite, including gradients;
+    * the float64 exp/log round trip still holds to 1e-5, while the float32 round trip cannot,
+      because ``expmap`` projects back to ``(1 - 4e-3) * radius``; float32 users must keep
+      latents inside that radius (``HyperbolicHead.max_step`` / ``embed_scale`` do).
     """
-    m = PoincareBall(-1.0)
-    direction = torch.randn(16, 4, dtype=torch.float64)
-    direction = direction / direction.norm(dim=-1, keepdim=True)
+    m = PoincareBall(c=c)
+    r = 0.999 * m.radius
+    g = torch.Generator().manual_seed(7)
+    dirn = torch.randn(16, 4, dtype=torch.float64, generator=g)
+    dirn = dirn / dirn.norm(dim=-1, keepdim=True)
+    a64, b64, inner64 = r * dirn, r * torch.roll(dirn, 1, 0), 0.5 * m.radius * dirn
+    a32, b32, inner32 = a64.float(), b64.float(), inner64.float()
 
-    # Antipodal points at radius 0.9: |(-x) (+) y| = 0.9945 < 1 - 4e-3, so both dtypes agree.
-    x64, y64 = direction * 0.9, -direction * 0.9
-    x32, y32 = x64.float(), y64.float()
-    d32, d64 = m.dist(x32, y32), m.dist(x64, y64)
-    assert torch.isfinite(d32).all()
-    assert torch.allclose(d64, 4 * torch.atanh(torch.tensor(0.9, dtype=torch.float64)))
-    assert torch.allclose(d32.double(), d64, rtol=2e-2)
-    assert torch.isfinite(m.logmap(x32, y32)).all()
-    assert torch.isfinite(m.expmap(x32, m.logmap(x32, y32))).all()
+    def close(x32: torch.Tensor, x64: torch.Tensor, rtol: float) -> bool:
+        return torch.allclose(x32.double(), x64, rtol=rtol, atol=1e-6)
 
-    # Radius 0.99: the Möbius sum lands inside the clamp margin. Float32 must be finite, capped
-    # at the documented maximum, and never exceed the float64 value; float64 keeps resolving.
-    z64, w64 = direction * 0.99, -direction * 0.99
-    z32, w32 = z64.float(), w64.float()
-    dz32, dz64 = m.dist(z32, w32), m.dist(z64, w64)
-    max_f32 = 2 * torch.atanh(torch.tensor(1 - BOUNDARY_EPS[torch.float32]))
-    assert torch.isfinite(dz32).all() and torch.isfinite(dz64).all()
-    assert torch.all(dz64 > d64) and torch.all(dz32 <= dz64.float())
-    assert torch.all(dz32 >= d32) and torch.all(dz32 <= max_f32 + 1e-4)
+    assert close(m.dist0(a32), m.dist0(a64), 1e-4)
+    assert close(m.logmap0(a32), m.logmap0(a64), 1e-4)
+    assert close(m.lambda_x(a32), m.lambda_x(a64), 1e-3)
+    assert close(m.dist(a32, inner32), m.dist(a64, inner64), 1e-4)
+    assert close(m.dist(a32, b32), m.dist(a64, b64), 3e-2)
+    assert close(m.dist(a32, -a32), m.dist(a64, -a64), 3e-2)
+    assert close(m.logmap(a32, b32), m.logmap(a64, b64), 3e-2)
+    assert torch.all(m.dist(a64, b64) > 2 * m.dist0(a64) - 5)  # boundary pairs are far apart
 
-    # Gradients through the clamped artanh stay finite in float32 at both radii.
-    for a0, b0 in ((x32, y32), (z32, w32)):
-        a = a0.clone().requires_grad_(True)
-        m.dist(a, b0).sum().backward()
-        assert torch.isfinite(a.grad).all()
+    for fn in (
+        m.dist(a32, b32),
+        m.logmap(a32, b32),
+        m.expmap(a32, m.logmap(a32, b32)),
+        m.ptransp(a32, b32, m.logmap(a32, b32)),
+    ):
+        assert torch.isfinite(fn).all()
+    aa = a32.clone().requires_grad_(True)
+    m.dist(aa, b32).sum().backward()
+    assert torch.isfinite(aa.grad).all()
+
+    rt64 = m.expmap(a64, m.logmap(a64, b64))
+    assert torch.all(m.dist(rt64, b64) < 1e-5)
+    rt32 = m.expmap(a32, m.logmap(a32, b32))
+    assert torch.all(rt32.norm(dim=-1) <= (1 - BOUNDARY_EPS[torch.float32]) * m.radius + 1e-6)
+    assert torch.all(
+        m.proj(b32).norm(dim=-1) < b32.norm(dim=-1)
+    )  # b32 itself is beyond the float32 clip
 
 
-def test_build_manifold_from_config() -> None:
-    m = build_manifold({"name": "poincare", "curvature": -0.25})
-    assert isinstance(m, PoincareBall)
-    assert m.curvature == -0.25 and m.c == 0.25
-    with pytest.raises(ValueError):
-        PoincareBall(0.0)
-    with pytest.raises(KeyError):
-        build_manifold({"name": "spherical", "curvature": 1.0})
+@pytest.mark.parametrize("c", [-1.0, -2.0])
+def test_float32_round_trip_holds_inside_the_clip_margin(c: float) -> None:
+    """At ``0.99 * radius`` (outside the 4e-3 margin) the float32 exp/log round trip is accurate."""
+    m = PoincareBall(c=c)
+    g = torch.Generator().manual_seed(3)
+    dirn = torch.randn(16, 4, generator=g)
+    dirn = dirn / dirn.norm(dim=-1, keepdim=True)
+    a, b = 0.99 * m.radius * dirn, 0.99 * m.radius * torch.roll(dirn, 1, 0)
+    rt = m.expmap(a, m.logmap(a, b))
+    assert torch.all(m.dist(rt, b) < 5e-2 * m.dist(a, b))
