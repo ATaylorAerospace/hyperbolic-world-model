@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Sweep curvature x latent dimension x seed for both hyperbolic models (Hydra multirun).
 # Curvature is never fixed: every reported hyperbolic number comes from this grid.
+# tasks=all includes compositional generalisation, so pass a held-out pair, e.g.
+#   bash scripts/run_curvature_sweep.sh both 'data.holdout_combinations=[[franka,grasp]]'
 #
 # Usage: bash scripts/run_curvature_sweep.sh [poincare|lorentz|both] [extra hydra overrides...]
 set -euo pipefail

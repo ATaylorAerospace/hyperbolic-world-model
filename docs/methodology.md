@@ -148,7 +148,7 @@ axis). The headline claim, if the hypothesis holds, is "hyperbolic reaches error
   out), so `max_step`, `embed_scale` and `max_radius` mean the same thing for every head, and the
   Poincaré and Lorentz heads at equal curvature are isometric twins (tested).
 - Every head applies the same numerical guard: proposed updates are clipped to `max_step` and any
-  state beyond `max_radius` (default 8) is retracted along its geodesic to the origin. In flat
+  state beyond `max_radius` (default 4) is retracted along its geodesic to the origin. In flat
   space this is a norm clip. It exists because float32 hyperbolic geometries lose accuracy
   exponentially with distance (below); without it a Lorentz rollout of five maximal steps
   produced NaNs in testing.
@@ -156,6 +156,15 @@ axis). The headline claim, if the hypothesis holds, is "hyperbolic reaches error
   layer-normalised tokens: the native-geometry rule applied to a Euclidean token-space model.
 
 ## Numerical caveats (measured, see `tests/geometry`)
+
+- The Poincaré ball clips points to `(1 - eps) * radius`, so nothing can lie farther than
+  `reliable_radius(c) = (2 / sqrt(-c)) * artanh(1 - eps)` from the origin: 6.2 units at `c = -1`,
+  4.4 at `c = -2`, 3.1 at `c = -4` in float32 (`geometry/utils.py::reliable_radius`). Every head
+  therefore enforces `min(max_radius, reliable_radius(c))`, in every geometry, so a config value
+  the ball cannot represent never turns into a silent per-curvature cap and the Poincaré and
+  Lorentz heads at the same curvature keep identical guards.
+- The default `max_radius` is 4 because the float32 hyperboloid's self-distance noise is 0.01 at
+  4 units, 0.09 at 6 and 0.7 at 8; at 8 the squared-distance loss floor would exceed a real step.
 
 The curved geometries delegate to geoopt (`geoopt.PoincareBall`, `geoopt.Lorentz`); we keep our
 own code only for the Lorentz parallel transport (geoopt's divides by the squared distance and is

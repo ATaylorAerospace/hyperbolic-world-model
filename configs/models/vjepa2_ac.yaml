@@ -24,5 +24,5 @@ head:
   embed_scale: 0.25                # layer-normed 1408-d tokens project to ~sqrt(latent_dim) = 8 units at scale 1;
                                    # 0.25 keeps embeddings ~2 units from the origin, inside the float32-safe region
   max_step: 5.0
-  max_radius: 8.0                  # geodesic retraction guard shared by both heads (null to disable)
+  max_radius: 4.0                  # geodesic retraction guard shared by both heads (null to disable); capped at the ball's representable radius
   seed: 0

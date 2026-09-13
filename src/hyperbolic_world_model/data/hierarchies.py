@@ -25,13 +25,15 @@ class Hierarchy:
         names: node label per index; index ``0`` is the root ``"<root>"``.
         parent: parent index per node; ``-1`` for the root.
         depth: depth per node (root ``0``).
-        levels: level name per node (``"root"``, then :data:`LEVELS`).
+        levels: level name per node (``"root"``, then ``level_names`` by depth).
+        level_names: the level name of each depth below the root (defaults to :data:`LEVELS`).
     """
 
     names: list[str] = field(default_factory=lambda: ["<root>"])
     parent: list[int] = field(default_factory=lambda: [-1])
     depth: list[int] = field(default_factory=lambda: [0])
     levels: list[str] = field(default_factory=lambda: ["root"])
+    level_names: tuple[str, ...] = LEVELS
     _index: dict[tuple[str, ...], int] = field(default_factory=lambda: {(): 0}, repr=False)
 
     # ------------------------------------------------------------------ construction
@@ -44,7 +46,9 @@ class Hierarchy:
                 self.names.append(label)
                 self.parent.append(node)
                 self.depth.append(lvl + 1)
-                self.levels.append(LEVELS[lvl] if lvl < len(LEVELS) else f"level_{lvl}")
+                self.levels.append(
+                    self.level_names[lvl] if lvl < len(self.level_names) else f"level_{lvl}"
+                )
                 self._index[key] = len(self.names) - 1
             node = self._index[key]
         return node
@@ -105,7 +109,7 @@ def build_hierarchy(metadata: Iterable[Mapping[str, str]], levels: Sequence[str]
     Raises:
         KeyError: if a record is missing a level key.
     """
-    tree = Hierarchy()
+    tree = Hierarchy(level_names=tuple(str(k) for k in levels))
     for rec in metadata:
         tree.add_path([str(rec[k]) for k in levels])
     return tree

@@ -68,7 +68,8 @@ def test_summary_table_aggregates_seeds(summary: pd.DataFrame) -> None:
 
 def test_sweep_table_is_a_curvature_by_dimension_grid(summary: pd.DataFrame) -> None:
     grid = sweep_table(summary, "latent_rollout", "geodesic_error_hmax")
-    assert list(grid.columns) == ["geometry", "curvature", "dim=8", "dim=16"]
+    assert list(grid.columns) == ["model", "geometry", "curvature", "dim=8", "dim=16"]
+    assert (grid["model"] == "synthetic").all()
     assert grid["geometry"].tolist() == ["euclidean", "poincare", "poincare"]
     assert grid["curvature"].tolist() == [0.0, -1.0, -0.5]
     assert all("±" in cell for cell in grid["dim=8"])

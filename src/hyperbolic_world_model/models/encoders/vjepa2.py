@@ -214,7 +214,12 @@ class VJEPA2ACEncoder(FrozenEncoder):
         clip = (
             x.flatten(0, 1).unsqueeze(2).repeat(1, 1, self.tubelet_size, 1, 1)
         )  # (B*T, 3, tubelet, H, W)
-        tokens = self.model(clip)  # (B*T, N, D)
+        # The wrapped encoder may run in bfloat16 on GPU while the normalisation buffers stay
+        # float32; feed it its own parameter dtype and compute the tokens back in float32.
+        param = next(self.model.parameters(), None)
+        if param is not None and param.dtype != clip.dtype:
+            clip = clip.to(param.dtype)
+        tokens = self.model(clip).to(x.dtype)  # (B*T, N, D)
         tokens = tokens.reshape(b, t, -1, self.embed_dim)
         if self.normalize_reps:
             tokens = F.layer_norm(tokens, (self.embed_dim,))

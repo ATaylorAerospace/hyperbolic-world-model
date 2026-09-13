@@ -246,3 +246,23 @@ def test_euclidean_head_rejects_curved_manifold_and_registry_builds_both() -> No
         build_predictor({**cfg, "type": "spherical"}, Euclidean(), ENC, ACT)
     with pytest.raises(ValueError):
         e(torch.randn(B, T, ENC), torch.randn(B, T, ACT))  # actions must be T - 1 long
+
+
+def test_max_radius_is_capped_at_the_representable_radius() -> None:
+    """A radius the ball cannot represent is reduced, identically for both hyperbolic heads."""
+    from hyperbolic_world_model.geometry.utils import reliable_radius
+
+    cap = reliable_radius(-4.0, torch.float32)
+    ball = HyperbolicHead(manifold=PoincareBall(c=-4.0), max_radius=8.0, **KW)
+    hyp = HyperbolicHead(manifold=Lorentz(c=-4.0), max_radius=8.0, **KW)
+    assert ball.requested_max_radius == 8.0 and ball.max_radius == pytest.approx(cap)
+    assert hyp.max_radius == pytest.approx(cap) and cap < 3.2
+    far = torch.randn(B, T, ENC) * 50
+    r_ball, r_hyp = ball.manifold.dist0(ball.embed(far)), hyp.manifold.dist0(hyp.embed(far))
+    assert torch.all(r_ball <= cap + 1e-3) and torch.all(r_hyp <= cap + 1e-3)
+    # Isometric twins: the same guard gives the same radii in both models.
+    assert torch.allclose(r_ball, r_hyp, atol=1e-3)
+    # Within the representable region nothing changes; flat space is never capped.
+    assert HyperbolicHead(manifold=PoincareBall(c=-1.0), max_radius=4.0, **KW).max_radius == 4.0
+    assert EuclideanHead(max_radius=8.0, **KW).max_radius == 8.0
+    assert HyperbolicHead(manifold=PoincareBall(c=-1.0), **KW).max_radius == 4.0  # default

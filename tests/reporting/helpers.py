@@ -24,18 +24,26 @@ def _value(geometry: str, curvature: float, dim: int, seed: int, metric: str) ->
 
 
 def write_run(
-    root: Path, experiment: str, geometry: str, curvature: float, dim: int, seed: int
+    root: Path,
+    experiment: str,
+    geometry: str,
+    curvature: float,
+    dim: int,
+    seed: int,
+    model: str = "synthetic",
+    offset: float = 0.0,
 ) -> Path:
+    """One fake run; ``offset`` shifts every value so a second model has different numbers."""
     d = root / experiment / f"geometry={geometry},K={curvature},dim={dim},seed={seed}"
     d.mkdir(parents=True, exist_ok=True)
-    err = _value(geometry, curvature, dim, seed, "geodesic_error_hmax")
+    err = _value(geometry, curvature, dim, seed, "geodesic_error_hmax") + offset
     payload = {
         "experiment": experiment,
         "geometry": geometry,
         "curvature": curvature,
         "latent_dim": dim,
         "seed": seed,
-        "model": "synthetic",
+        "model": model,
         "train_history": [{"epoch": 0, "loss": 1.0}],
         "tasks": {
             "latent_rollout": {
@@ -49,7 +57,7 @@ def write_run(
                 "geometry": geometry,
                 "curvature": curvature,
                 "metrics": {
-                    "map": _value(geometry, curvature, dim, seed, "map"),
+                    "map": _value(geometry, curvature, dim, seed, "map") + offset,
                     "map_std": 0.01,
                     "n_nodes": 27,
                 },
@@ -78,11 +86,13 @@ def write_run(
     return d
 
 
-def write_outputs_tree(root: Path, with_sweep: bool = True) -> Path:
+def write_outputs_tree(
+    root: Path, with_sweep: bool = True, model: str = "synthetic", offset: float = 0.0
+) -> Path:
     for dim in DIMS:
         for seed in SEEDS:
-            write_run(root, "baseline_euclidean", "euclidean", 0.0, dim, seed)
+            write_run(root, "baseline_euclidean", "euclidean", 0.0, dim, seed, model, offset)
             if with_sweep:
                 for k in CURVATURES:
-                    write_run(root, "poincare_sweep", "poincare", k, dim, seed)
+                    write_run(root, "poincare_sweep", "poincare", k, dim, seed, model, offset)
     return root

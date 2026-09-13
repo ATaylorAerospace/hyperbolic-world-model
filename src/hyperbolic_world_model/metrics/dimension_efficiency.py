@@ -122,7 +122,8 @@ def area_under_curve(curve: DimensionCurve, log_dims: bool = True) -> float:
     y = np.asarray(curve.values, dtype=float)
     if len(x) < 2:
         raise ValueError("need at least two dimensions to compute an area")
-    return float(np.trapezoid(y, x))
+    # Trapezoid rule written out so it runs on NumPy 1.26 (no ``trapezoid``) and 2.x alike.
+    return float(np.sum((y[1:] + y[:-1]) * np.diff(x) / 2.0))
 
 
 def dimension_to_reach(
