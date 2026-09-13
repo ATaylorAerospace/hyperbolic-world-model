@@ -3,7 +3,7 @@
 # 🌀 Hyperbolic Latent Evaluation for World Models 📐
 
 [![CI](https://github.com/ATaylorAerospace/hyperbolic-world-model/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ATaylorAerospace/hyperbolic-world-model/actions/workflows/ci.yml?query=branch%3Amain)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
 [![geoopt](https://img.shields.io/badge/geoopt-0.5%2B-6f42c1)](https://github.com/geoopt/geoopt)
@@ -167,7 +167,7 @@ Environment variables (copy `.env.example` to `.env`):
 ```text
 .
 ├── README.md                          # this file; regenerated at the end of every phase
-├── LICENSE                            # Apache 2.0, © 2026 A Taylor
+├── LICENSE                            # PolyForm Noncommercial 1.0.0, © 2026 A Taylor; commercial licences on request
 ├── THIRD_PARTY_LICENSES.md            # upstream code and weight licences; nothing redistributed
 ├── CONTRIBUTING.md                    # ground rules: Manifold-only geometry, frozen encoders, swept curvature
 ├── pyproject.toml                     # uv-compatible metadata, ruff and pytest config
@@ -392,7 +392,7 @@ No model weights are included in this repository. Every checkpoint is downloaded
 - **DINOv2** (`facebook/dinov2-base`): Apache 2.0. Used frozen.
 - **NVIDIA Cosmos 3 Nano** (`nvidia/Cosmos3-Nano`, via NVIDIA's cosmos-framework): OpenMDW 1.1. Used for inference only; never modified, generation quality never reported.
 
-Trained predictor heads written to `checkpoints/predictors/` contain only the head's own parameters and fall under this repository's Apache 2.0 licence. Full list: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+Trained predictor heads written to `checkpoints/predictors/` contain only the head's own parameters and fall under this repository's licence. Full list: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ---
 
@@ -410,7 +410,7 @@ Ground rules, setup and the review checklist are in [CONTRIBUTING.md](CONTRIBUTI
 
 ## 📜 License
 
-Apache 2.0. See [LICENSE](LICENSE).
+[PolyForm Noncommercial 1.0.0](LICENSE). Research, teaching, personal and other noncommercial use, modification and redistribution are permitted; any commercial use needs a separate licence from the copyright holder, available on request through the contact link below. Every third-party dependency is permissively licensed and no model weights are redistributed, so the upstream terms in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) are unaffected.
 
 Copyright 2026 A Taylor.
 
