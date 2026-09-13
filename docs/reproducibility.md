@@ -49,15 +49,17 @@ resolved versions of everything else match the lockfile. Do not edit `uv.lock` b
 ## What every run writes
 
 ```text
-outputs/<experiment>/geometry=<name>,K=<curvature>,dim=<latent_dim>/
+outputs/<experiment>/geometry=<name>,K=<curvature>,dim=<latent_dim>,seed=<seed>/
 ├── config.yaml                 # fully resolved Hydra config, including seed and model ids
-├── metrics.json                # geometry + curvature + latent_dim + per-task metrics + train loss history
-├── latent_rollout_curves.csv   # error vs horizon (per task that produces curves)
+├── metrics.json                # geometry + curvature + latent_dim + seed + per-task metrics + train loss history
+├── <task>_curves.csv           # one per task: error vs horizon, dist0 vs depth, divergence vs horizon, seen vs unseen
 └── hydra/                      # Hydra's own logs and override records
 ```
 
-The report (`outputs/report/`) is a pure function of these files: running `make_report.sh`
-twice gives identical output.
+The seed is part of the directory name so the three seeds of a sweep never overwrite each other
+and the report can show mean ± std. The report (`outputs/report/`) is a pure function of these
+files: running `make_report.sh` twice gives byte-identical output (see `outputs/README.md` for
+the list of tables and figures).
 
 ## Environment variables
 

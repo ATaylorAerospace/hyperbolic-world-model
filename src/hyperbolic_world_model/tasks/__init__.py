@@ -1,6 +1,13 @@
 """Evaluation tasks. Each task consumes a :class:`~hyperbolic_world_model.models.ModelBundle` and a
 dataset and returns a :class:`~hyperbolic_world_model.tasks.base.TaskResult` whose distance-based
 numbers are computed with ``bundle.manifold``.
+
+The four tasks and the hypothesis each tests are documented in ``docs/methodology.md``:
+
+* ``latent_rollout``: open-loop geodesic error versus horizon with the static baseline;
+* ``hierarchy_reconstruction``: distortion, mAP and depth correlation against the metadata tree;
+* ``long_horizon_consistency``: latent divergence of branching rollouts versus video divergence;
+* ``compositional_generalization``: rollout error gap on held-out (embodiment, primitive) pairs.
 """
 
 from __future__ import annotations
@@ -8,7 +15,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from hyperbolic_world_model.tasks.base import Task, TaskResult
+from hyperbolic_world_model.tasks.base import (
+    EmbeddedBatch,
+    Task,
+    TaskResult,
+    frechet_mean,
+    spearman,
+)
 from hyperbolic_world_model.tasks.compositional_generalization import (
     CompositionalGeneralizationTask,
 )
@@ -33,4 +46,16 @@ def build_task(task_cfg: Mapping[str, Any]) -> Task:
     return TASKS[name](**cfg)
 
 
-__all__ = ["TASKS", "Task", "TaskResult", "build_task"]
+__all__ = [
+    "TASKS",
+    "CompositionalGeneralizationTask",
+    "EmbeddedBatch",
+    "HierarchyReconstructionTask",
+    "LatentRolloutTask",
+    "LongHorizonConsistencyTask",
+    "Task",
+    "TaskResult",
+    "build_task",
+    "frechet_mean",
+    "spearman",
+]

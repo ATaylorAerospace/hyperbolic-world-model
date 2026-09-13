@@ -6,6 +6,10 @@ renderer and :class:`~hyperbolic_world_model.models.encoders.synthetic.Synthetic
 the composed latent dynamics are learnable by a small head, so a smoke run can show error going
 down, which is the property CI checks. Metadata carries a two-level hierarchy (two embodiments x
 two primitives) so hierarchy tasks have something to chew on.
+
+With ``n_branches > 1`` consecutive episodes form a prompt: they share the initial hidden state
+and the rendered start frame and differ only in their actions, which is the branching structure
+the long-horizon consistency task needs (:meth:`SyntheticTrajectoryDataset.branch_pairs`).
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ class SyntheticSpec:
     frame_shape: tuple[int, int, int] = (1, 8, 8)
     noise_std: float = 0.01
     seed: int = 0
+    n_branches: int = 1  # episodes per prompt sharing the start state and start frame
 
 
 class SyntheticTrajectoryDataset(Dataset):
@@ -44,7 +49,11 @@ class SyntheticTrajectoryDataset(Dataset):
         self.B = torch.randn(a, k, generator=shared) / a**0.5
         self.render = torch.randn(k, c * h * w, generator=shared) / k**0.5
 
-        states = [torch.randn(spec.n_episodes, k, generator=gen)]
+        if spec.n_branches < 1 or spec.n_episodes % spec.n_branches:
+            raise ValueError("n_branches must be >= 1 and divide n_episodes")
+        n_prompts = spec.n_episodes // spec.n_branches
+        h0 = torch.randn(n_prompts, k, generator=gen).repeat_interleave(spec.n_branches, dim=0)
+        states = [h0]
         actions = torch.randn(spec.n_episodes, spec.horizon, a, generator=gen)
         for t in range(spec.horizon):
             s = states[-1]
@@ -55,6 +64,9 @@ class SyntheticTrajectoryDataset(Dataset):
             spec.n_episodes, spec.horizon + 1, c * h * w, generator=gen
         )
         frames = torch.sigmoid(frames).reshape(spec.n_episodes, spec.horizon + 1, c, h, w)
+        # Branches of a prompt share the start frame exactly (same state, same noise draw).
+        first = frames[:: spec.n_branches, 0].repeat_interleave(spec.n_branches, dim=0)
+        frames[:, 0] = first
 
         self.frames: Tensor = frames
         self.actions: Tensor = actions
@@ -62,9 +74,31 @@ class SyntheticTrajectoryDataset(Dataset):
         emb = ["arm_a", "arm_b"]
         prim = ["reach", "grasp"]
         self.meta = [
-            {"embodiment": emb[i % 2], "task": f"task_{(i // 2) % 4}", "primitive": prim[(i // 8) % 2]}
+            {
+                "embodiment": emb[i % 2],
+                "task": f"task_{(i // 2) % 4}",
+                "primitive": prim[(i // 8) % 2],
+                "prompt_id": f"p{i // spec.n_branches}",
+                "branch_id": f"b{i % spec.n_branches}",
+            }
             for i in range(spec.n_episodes)
         ]
+
+    def branches(self) -> dict[str, list[int]]:
+        """``prompt_id -> episode indices`` sharing a start frame (one entry each if unbranched)."""
+        groups: dict[str, list[int]] = {}
+        for i, rec in enumerate(self.meta):
+            groups.setdefault(rec["prompt_id"], []).append(i)
+        return groups
+
+    def branch_pairs(self) -> list[tuple[int, int]]:
+        """All unordered pairs of episodes that share a start frame (empty when ``n_branches == 1``)."""
+        pairs = []
+        for idxs in self.branches().values():
+            for a in range(len(idxs)):
+                for b in range(a + 1, len(idxs)):
+                    pairs.append((idxs[a], idxs[b]))
+        return pairs
 
     @classmethod
     def from_config(cls, cfg: Mapping[str, Any], split: str = "train") -> SyntheticTrajectoryDataset:

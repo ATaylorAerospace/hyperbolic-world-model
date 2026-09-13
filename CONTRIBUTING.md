@@ -11,7 +11,7 @@ git clone https://github.com/ATaylorAerospace/hyperbolic-world-model
 cd hyperbolic-world-model
 uv sync                       # creates .venv with the locked dependencies
 cp .env.example .env          # fill in HF_TOKEN if you need gated weights
-uv run pytest                 # 348 tests, CPU, < 30 s
+uv run pytest                 # 452 tests, CPU, < 30 s
 uv run ruff check . && uv run ruff format --check .
 ```
 
@@ -43,7 +43,8 @@ uv run ruff check . && uv run ruff format --check .
 - Branch from `main`; keep PRs focused (one geometry, one task, one metric).
 - Add or update tests alongside code. Stubs must raise `NotImplementedError` with a pointer to
   the plan in the module docstring; never return placeholder values.
-- Run `uv run pytest` and `ruff` locally; CI runs `tests/geometry`, `tests/metrics` and the smoke
+- Run `uv run pytest` and `ruff` locally; CI runs `tests/geometry`, `tests/metrics`, `tests/tasks`,
+  `tests/reporting` and the smoke
   experiment on CPU.
 - Update `README.md` in the same PR whenever you add a module, a config option, a task, or a test
   (the status line carries the test count).
