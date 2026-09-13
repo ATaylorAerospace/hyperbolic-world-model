@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded pull-request runs are cancelled; runs on main always finish so the badge and the
+  # default-branch status never show a cancelled run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Everything in CI runs on CPU. Torch is pulled from the CPU wheel index to keep the job small.
