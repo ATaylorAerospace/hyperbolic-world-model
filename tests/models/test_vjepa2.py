@@ -188,6 +188,15 @@ def test_pretrained_path_cleans_keys_and_loads_strictly(
         v.load_vjepa2_ac(pretrained=True, cache_dir=tmp_path)
 
 
+def test_local_checkout_path_uses_hub_local_source(fake_hub: dict, tmp_path) -> None:
+    enc = v.load_vjepa2_ac(hub_repo=str(tmp_path), pretrained=False)
+    assert fake_hub["repo"] == str(tmp_path) and fake_hub["kwargs"]["source"] == "local"
+    assert "source" not in v.__dict__  # sanity: no module-level leakage
+    assert isinstance(enc, v.VJEPA2ACEncoder)
+    v.load_vjepa2_ac(hub_repo="owner/name", hub_ref=None, pretrained=False)
+    assert fake_hub["repo"] == "owner/name" and "source" not in fake_hub["kwargs"]
+
+
 def test_missing_hub_dependencies_produce_an_actionable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -195,7 +204,7 @@ def test_missing_hub_dependencies_produce_an_actionable_error(
         raise RuntimeError("Missing dependencies: timm")
 
     monkeypatch.setattr(torch.hub, "load", fake_load)
-    with pytest.raises(RuntimeError, match="uv pip install timm"):
+    with pytest.raises(RuntimeError, match="uv sync --extra vjepa2"):
         v.load_vjepa2_ac(pretrained=False)
 
 

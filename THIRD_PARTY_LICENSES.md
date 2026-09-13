@@ -13,7 +13,8 @@ source under the upstream terms.
 | geoopt | Riemannian optimisers and reference manifold implementations | Apache 2.0 | https://github.com/geoopt/geoopt |
 | DINOv2 (code) | Frozen image encoder for the DINO-WM subject | Apache 2.0 | https://github.com/facebookresearch/dinov2 |
 | Hydra / OmegaConf | Configuration and sweeps | Apache 2.0 (Hydra), BSD-3 (OmegaConf) | https://github.com/facebookresearch/hydra |
-| transformers | Loading V-JEPA 2 and DINOv2 from the Hugging Face Hub | Apache 2.0 | https://github.com/huggingface/transformers |
+| transformers | Loading DINOv2 from the Hugging Face Hub | Apache 2.0 | https://github.com/huggingface/transformers |
+| timm (optional `vjepa2` extra) | Required by the upstream vjepa2 code that torch.hub imports for the V-JEPA 2-AC loader | Apache 2.0 | https://github.com/huggingface/pytorch-image-models |
 | PyTorch | Tensors and autograd | BSD-3 | https://github.com/pytorch/pytorch |
 | einops, numpy, pandas, matplotlib, huggingface_hub | Utilities | MIT / BSD-3 / BSD-3 / PSF-based / Apache 2.0 | respective repositories |
 

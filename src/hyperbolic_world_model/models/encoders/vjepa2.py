@@ -23,8 +23,8 @@ checkpoint URL with ``torch.hub.load_state_dict_from_url`` and cached under ``CK
 not pass ``pretrained=True`` to hub because upstream resolves the checkpoint URL from a module
 constant that has, on ``main``, pointed at a local test server; fetching the official file
 directly is deterministic and lets us pin ``hub_ref`` to an inspected commit. Hub's own dependency
-check requires ``timm`` and ``einops`` to be importable on the loading machine; ``timm`` is not a
-dependency of this repository (see :func:`load_vjepa2_ac`).
+check requires ``timm`` and ``einops`` to be importable on the loading machine; ``timm`` is the
+``vjepa2`` optional extra of this repository (``uv sync --extra vjepa2``).
 
 There is deliberately no training path in this module: :func:`load_vjepa2_ac` freezes every
 parameter of both modules and :meth:`VJEPA2ACEncoder.assert_frozen` is called by the trainer
@@ -222,15 +222,21 @@ class VJEPA2ACEncoder(FrozenEncoder):
 
 
 def _hub_load(hub_repo: str, hub_ref: str | None, **kwargs: Any) -> tuple[nn.Module, nn.Module]:
-    repo = f"{hub_repo}:{hub_ref}" if hub_ref else hub_repo
+    """``torch.hub.load`` of the AC entry point; a local checkout path is accepted in place of ``owner/name``."""
+    if Path(
+        hub_repo
+    ).is_dir():  # air-gapped machines: a clone of facebookresearch/vjepa2 at hub_ref
+        repo, extra = str(hub_repo), {"source": "local"}
+    else:
+        repo, extra = (f"{hub_repo}:{hub_ref}" if hub_ref else hub_repo), {}
     try:
-        return torch.hub.load(repo, HUB_ENTRY, trust_repo=True, **kwargs)
+        return torch.hub.load(repo, HUB_ENTRY, trust_repo=True, **extra, **kwargs)
     except RuntimeError as e:
         if "Missing dependencies" in str(e):
             raise RuntimeError(
                 "torch.hub needs the upstream vjepa2 dependencies importable on this machine "
-                "(`timm`, `einops`). `timm` is not a dependency of hyperbolic-world-model; install it "
-                "into the environment before loading the V-JEPA 2-AC checkpoint: uv pip install timm"
+                "(`timm`, `einops`). Install the `vjepa2` extra before loading the V-JEPA 2-AC "
+                "checkpoint: uv sync --extra vjepa2 (or: uv pip install timm)"
             ) from e
         raise
 
@@ -248,7 +254,8 @@ def load_vjepa2_ac(
     """Load the V-JEPA 2-AC checkpoint (frozen encoder + frozen reference predictor) via torch.hub.
 
     Args:
-        hub_repo: GitHub ``owner/name`` served by torch.hub.
+        hub_repo: GitHub ``owner/name`` served by torch.hub, or the path of a local clone of it
+            (loaded with ``source="local"``; ``hub_ref`` is then the caller's responsibility).
         hub_ref: branch, tag or commit of ``hub_repo``; defaults to the inspected commit.
         pretrained: download Meta's weights from ``checkpoint_url`` (cached under ``cache_dir``).
             ``False`` builds the randomly initialised architecture (tests only).

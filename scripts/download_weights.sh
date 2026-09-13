@@ -3,7 +3,7 @@
 # Reads HF_TOKEN from the environment (or .env). Never downloads datasets.
 #
 #   V-JEPA 2-AC  vjepa2_ac_vit_giant via torch.hub (MIT code; weights from dl.fbaipublicfiles.com)
-#                needs `timm` importable (upstream hub dependency): uv pip install timm
+#                needs the `vjepa2` extra (timm, an upstream hub dependency): uv sync --extra vjepa2
 #   DINOv2     facebook/dinov2-base             (Apache 2.0)
 #   Cosmos 3   nvidia/Cosmos-3-Nano              (OpenMDW 1.1, gated: accept terms on the Hub first)
 #
