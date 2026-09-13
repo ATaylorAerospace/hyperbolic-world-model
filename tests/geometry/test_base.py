@@ -8,7 +8,6 @@ from __future__ import annotations
 import geoopt
 import pytest
 import torch
-from tests.geometry.helpers import random_points, random_tangents, tol
 
 from hyperbolic_world_model.geometry import (
     MANIFOLDS,
@@ -18,6 +17,7 @@ from hyperbolic_world_model.geometry import (
     PoincareBall,
     build_manifold,
 )
+from tests.geometry.helpers import random_points, random_tangents, tol
 
 MANIFOLD_CASES = [
     pytest.param(Euclidean(), id="euclidean"),

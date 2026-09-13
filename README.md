@@ -7,14 +7,14 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
 [![geoopt](https://img.shields.io/badge/geoopt-0.5%2B-6f42c1)](https://github.com/geoopt/geoopt)
-[![Tests](https://img.shields.io/badge/tests-348%20passing-brightgreen)](#-verification)
+[![Tests](https://img.shields.io/badge/tests-452%20passing-brightgreen)](#-verification)
 [![Curvature: Swept](https://img.shields.io/badge/Curvature-Swept-orange)](docs/methodology.md)
 
 **A research harness that retrains the action-conditioned predictor head of a frozen video world model (V-JEPA 2-AC, with DINO-WM as a lightweight second subject) in Euclidean, Poincaré and Lorentz latent spaces, and measures whether negative curvature buys better rollouts, hierarchy recovery and dimension efficiency, with every distance computed in the geometry of the model that produced it and curvature always swept.**
 
 **Author: A Taylor**
 
-> 🚧 **Status:** Geometry primitives stable · V-JEPA 2-AC head training · 348/348 tests passing.
+> 🚧 **Status:** Geometry primitives stable · four metrics and four tasks implemented · one-command report · V-JEPA 2-AC head training · 452/452 tests passing.
 
 ---
 
@@ -37,7 +37,7 @@ Hyperbolic space has exponential volume growth and embeds any tree with arbitrar
 - 🔬 **Probe** the delta-hyperbolicity of V-JEPA 2, DINOv2 and Cosmos 3 tokenizer latents, independent of any head we train.
 - 🎛️ **Sweep** curvature × latent dimension × seed for both hyperbolic models via Hydra multirun. Curvature is never a fixed constant.
 - 📏 **Measure** rollout error, distortion, mAP and dimension efficiency in each model's *native* geometry via a single `Manifold` interface.
-- 📊 **Report** every table and figure by regenerating them from `outputs/` with one script, never by hand.
+- 📊 **Report** every table and curvature-sweep figure by regenerating them from `outputs/` with one command (`scripts/make_report.sh`), never by hand; the same `outputs/` gives byte-identical files.
 
 ---
 
@@ -106,12 +106,12 @@ The geometry boundary is labelled like a trust boundary on purpose: code above i
 
 | Metric | What it measures | Geometry-aware | Module |
 |---|---|---|---|
-| Geodesic rollout error | Open-loop prediction error vs horizon, plus a "nothing moves" static baseline for normalisation | Yes: `manifold.dist` of the head's own geometry | `metrics/geodesic_error.py` |
-| Normalised geodesic error | Error divided by the distance the true latent travelled; equals 1 for a static predictor in every geometry, so it is comparable across curvatures | Yes | `metrics/geodesic_error.py` |
+| Geodesic rollout error | Open-loop prediction error vs horizon (mean, median or unreduced), plus a "nothing moves" static baseline for normalisation | Yes: `manifold.dist` of the head's own geometry; anything that is not a `Manifold` raises `TypeError`, and the module's AST is tested to call no other distance | `metrics/geodesic_error.py` |
+| Normalised geodesic error | Error divided by the distance the true latent travelled, per sample or as a per-horizon ratio of batch means; equals 1 for a static predictor in every geometry, so it is comparable across curvatures | Yes | `metrics/geodesic_error.py` |
 | Gromov δ-hyperbolicity | How tree-like a latent point cloud is (0 for trees), via Gromov products with subsampling; also diameter-normalised | Yes: pairwise distances from any `Manifold` | `metrics/gromov_hyperbolicity.py` |
 | Average distortion | Scale-fitted relative error between manifold distances and tree hop counts | Yes | `metrics/distortion.py` |
 | mAP | Precision of retrieving true tree neighbours by manifold distance | Yes | `metrics/distortion.py` |
-| Dimension efficiency | Metric-vs-latent-dimension curves, area under curve on a log₂ axis, dimension needed to reach a threshold | Consumes the above | `metrics/dimension_efficiency.py` |
+| Dimension efficiency | Metric-vs-latent-dimension curves (seeds averaged), area under curve on a log₂ axis, dimension needed to reach a threshold in either direction, one efficiency table per metric | Consumes the above | `metrics/dimension_efficiency.py` |
 
 ---
 
@@ -119,10 +119,10 @@ The geometry boundary is labelled like a trust boundary on purpose: code above i
 
 | Task | Hypothesis tested | Data source | Falsified if |
 |---|---|---|---|
-| Latent rollout | At equal dimension the best swept curvature gives lower normalised geodesic error than Euclidean at horizons > 1 | DROID, Cosmos 3 rollouts, synthetic (CI) | No curvature beats Euclidean at any horizon > 1 by more than one seed std, at any dimension |
-| Hierarchy reconstruction | Per-trajectory latents recover embodiment > task > primitive with lower distortion and higher mAP, and distance from origin tracks depth | DROID metadata (synthetic tree in CI) | Best curvature does not improve both distortion and mAP beyond seed std, or depth correlation is not positive |
-| Long-horizon consistency | Latent divergence between branching rollouts tracks video divergence with higher correlation and saturates later in hyperbolic space | Cosmos-generated branches (`Cosmos3TrajectoryDataset.branch_pairs`) | Correlation is not higher or saturation not later for the best curvature |
-| Compositional generalisation | The unseen-minus-seen error gap on held-out (embodiment, primitive) pairs is smaller in hyperbolic space | DROID or Cosmos-generated data with `holdout_combinations` (`split_by_combination`) | Gap is not smaller, or is smaller only because seen error got worse |
+| Latent rollout (`tasks/latent_rollout.py`) | At equal dimension the best swept curvature gives lower normalised geodesic error than Euclidean at horizons > 1 | DROID, Cosmos 3 rollouts, synthetic (CI) | No curvature beats Euclidean at any horizon > 1 by more than one seed std, at any dimension |
+| Hierarchy reconstruction (`tasks/hierarchy_reconstruction.py`) | Per-trajectory latents (Fréchet mean over time, tree nodes as Fréchet means of their subtrees) recover embodiment > task > primitive with lower distortion and higher mAP, and `dist0` tracks depth (Spearman); bootstrap std over trajectories reported | DROID metadata (synthetic tree in CI) | Best curvature does not improve both distortion and mAP beyond seed std, or depth correlation is not positive |
+| Long-horizon consistency (`tasks/long_horizon_consistency.py`) | Geodesic divergence between the rollouts of two branches sharing a start frame tracks the frozen encoder's divergence of the generated frames (Spearman, pooled and per horizon) with higher correlation and saturates later in hyperbolic space; embedded-latent and pixel divergence reported as controls | Cosmos-generated branches (`Cosmos3TrajectoryDataset.branch_pairs`), synthetic branches (`data.n_branches`, CI) | Correlation is not higher or saturation not later for the best curvature |
+| Compositional generalisation (`tasks/compositional_generalization.py`) | The unseen-minus-seen normalised error gap on held-out (embodiment, primitive) pairs is smaller in hyperbolic space; the trainer excludes the held-out pairs from the training set | DROID, Cosmos-generated or synthetic data with `holdout_combinations` (`split_by_combination`, or the item metadata) | Gap is not smaller, or is smaller only because seen error got worse |
 
 ---
 
@@ -174,7 +174,7 @@ Environment variables (copy `.env.example` to `.env`):
 ├── uv.lock                            # generated by `uv lock`; pins every dependency
 ├── .gitignore                         # Python, data/, checkpoints/, outputs/, .env, wandb/
 ├── .env.example                       # HF_TOKEN, WANDB_API_KEY, DATA_ROOT, CKPT_ROOT
-├── .github/workflows/ci.yml           # ruff, pytest on geometry/ and metrics/ (CPU), one smoke benchmark
+├── .github/workflows/ci.yml           # ruff, pytest on geometry/, metrics/, tasks/ and reporting/ (CPU), one smoke benchmark
 ├── configs/
 │   ├── config.yaml                    # Hydra root: defaults list, output_dir pattern, training block
 │   ├── geometry/                      # euclidean.yaml, poincare.yaml (K swept), lorentz.yaml
@@ -196,27 +196,27 @@ Environment variables (copy `.env.example` to `.env`):
 │   │   └── registry.py                # build_manifold / build_encoder / build_predictor / build_model from config
 │   ├── data/
 │   │   ├── droid.py                   # action normalisation + chunking (done); DROID loader (TODO phase 2)
-│   │   ├── synthetic.py               # in-memory linear-dynamics trajectories for the smoke run
+│   │   ├── synthetic.py               # in-memory linear-dynamics trajectories for the smoke run; optional branches sharing a start frame
 │   │   ├── hierarchies.py             # embodiment > task > primitive tree, hop-count metric, adjacency
 │   │   └── cosmos3/                   # generate.py (Cosmos 3 Nano forward-dynamics rollouts via cosmos-framework), extract_latents.py (vision-VAE latents), dataset.py (manifest loader)
 │   ├── metrics/
-│   │   ├── geodesic_error.py          # rollout error in native geometry, per-horizon and normalised
+│   │   ├── geodesic_error.py          # rollout error in native geometry, static baseline, per-horizon and normalised; Manifold only
 │   │   ├── gromov_hyperbolicity.py    # δ estimator via Gromov products with subsampling
 │   │   ├── distortion.py              # scale-fitted average distortion and mAP
-│   │   └── dimension_efficiency.py    # metric-vs-dimension tables, AUC, dimension-to-reach
+│   │   └── dimension_efficiency.py    # metric-vs-dimension tables and curves, log2 AUC, dimension-to-reach, efficiency table
 │   ├── tasks/
-│   │   ├── base.py                    # Task ABC and TaskResult (geometry + curvature stamped on every result)
-│   │   ├── latent_rollout.py          # implemented: open-loop rollout vs static baseline
-│   │   ├── hierarchy_reconstruction.py       # hypothesis + plan documented, run() TODO phase 2
-│   │   ├── long_horizon_consistency.py       # needs Cosmos 3 branches, run() TODO phase 2
-│   │   └── compositional_generalization.py   # held-out combinations, run() TODO phase 2
+│   │   ├── base.py                    # Task ABC, TaskResult (geometry + curvature stamped on every result), batched embedding, Fréchet mean, Spearman
+│   │   ├── latent_rollout.py          # open-loop rollout vs static baseline, per-horizon curves
+│   │   ├── hierarchy_reconstruction.py       # Fréchet-pooled tree nodes: distortion, mAP, depth correlation, bootstrap std
+│   │   ├── long_horizon_consistency.py       # branching rollouts: latent vs encoder/pixel divergence, correlation, saturation
+│   │   └── compositional_generalization.py   # held-out (embodiment, primitive) pairs: seen vs unseen rollout error and gap
 │   ├── training/
-│   │   ├── train_predictor.py         # Hydra entry point; trains the head only; asserts encoder frozen
+│   │   ├── train_predictor.py         # Hydra entry point; builds tasks first; trains the head only (seen combinations when a holdout is set); asserts encoder frozen
 │   │   └── riemannian_optim.py        # AdamW, or geoopt RiemannianAdam if any ManifoldParameter exists
 │   └── reporting/
-│       ├── tables.py                  # collect metrics.json → long table → Markdown
-│       ├── curvature_sweep_plots.py   # metric vs curvature, error vs horizon (matplotlib, headless)
-│       └── make_report.py             # regenerates every table and figure from outputs/
+│       ├── tables.py                  # collect metrics.json → results, summary (mean ± std), sweep grids, best-vs-Euclidean, dimension efficiency → Markdown
+│       ├── curvature_sweep_plots.py   # metric vs curvature, metric vs dimension, every task's curves (matplotlib, headless, deterministic)
+│       └── make_report.py             # one command regenerates every table and figure from outputs/
 ├── scripts/
 │   ├── download_weights.sh            # V-JEPA 2-AC via torch.hub, DINOv2 and Cosmos 3 Nano via huggingface_hub; reads HF_TOKEN
 │   ├── generate_cosmos3_trajectories.sh   # generate rollouts into $DATA_ROOT/cosmos3_generated, then extract tokenizer latents
@@ -229,8 +229,10 @@ Environment variables (copy `.env.example` to `.env`):
 │   ├── geometry/                      # test_base.py (contract over all geometries), test_poincare.py, test_lorentz.py, test_euclidean.py, test_utils.py, test_public_api.py, helpers.py
 │   ├── models/                        # test_predictor_heads.py (shapes, identical architecture, isometric twins), test_vjepa2.py (hub loader with fakes)
 │   ├── data/                          # test_cosmos3.py (generation pipeline, adapter chunk loop, latents, dataset; all with fakes)
-│   ├── metrics/                       # test_gromov_hyperbolicity.py, test_distortion.py
-│   └── test_smoke_experiment.py       # runs configs/experiments/smoke.yaml on CPU in all three geometries
+│   ├── metrics/                       # test_geodesic_error.py, test_gromov_hyperbolicity.py, test_distortion.py, test_dimension_efficiency.py
+│   ├── tasks/                         # test_base.py (registry, Fréchet mean, Spearman), one file per task, helpers.py (tiny bundles, branching datasets)
+│   ├── reporting/                     # test_tables.py, test_make_report.py (every file written, byte-identical rerun), helpers.py (fake outputs/ tree)
+│   └── test_smoke_experiment.py       # runs configs/experiments/smoke.yaml on CPU in all three geometries, and all four tasks on branched synthetic data
 ├── data/README.md                     # expected dataset layout (directory gitignored)
 ├── checkpoints/README.md              # expected weight layout (directory gitignored)
 ├── outputs/README.md                  # what every run writes (directory gitignored)
@@ -270,6 +272,9 @@ Environment variables (copy `.env.example` to `.env`):
    ```bash
    uv run pytest -v
    uv run bash scripts/run_smoke.sh
+   # all four tasks on CPU: branching synthetic prompts and one held-out (embodiment, primitive) pair
+   uv run bash scripts/run_smoke.sh tasks=all data.n_branches=2 'data.holdout_combinations=[[arm_b,grasp]]'
+   bash scripts/make_report.sh   # tables and figures for everything under outputs/
    ```
 
 5. **Baseline** the Euclidean head on DROID with all tasks
@@ -302,25 +307,28 @@ Environment variables (copy `.env.example` to `.env`):
 | `geometry/lorentz.py` | Hyperboloid | Wraps `geoopt.Lorentz`; own transport (finite at coincident points) and own isometries (geoopt's assume the unit ball); isometric to the ball to 1e-9 at every curvature; float32 self-distance noise ≤ 2e-3·x₀ | ✅ |
 | `geometry/utils.py` | Stable primitives | geoopt's `artanh`/`arcosh` re-exported; per-dtype epsilons; norm clipping | ✅ |
 | `tests/geometry/test_public_api.py` | API coverage guard | Fails if any public geometry function, method or constant is not referenced by a geometry test | ✅ |
-| `metrics/geodesic_error.py` | Rollout error | Takes a `Manifold`; no Euclidean fallback; static baseline for normalisation | ✅ |
+| `metrics/geodesic_error.py` | Rollout error | Takes a `Manifold` and raises `TypeError` for anything else; the module's AST is tested to call no distance but `manifold.dist`; static "nothing moves" baseline; per-sample and per-horizon normalised error that is exactly 1 for a static predictor on Euclidean, Poincaré (two curvatures) and Lorentz | ✅ |
 | `metrics/gromov_hyperbolicity.py` | δ-hyperbolicity | δ = 0 on tree metrics, > 0 on grids; scale covariant; chunked max-min product | ✅ |
 | `metrics/distortion.py` | Distortion, mAP | Scale-fitted; 0 distortion / 1.0 mAP on a perfect embedding | ✅ |
-| `metrics/dimension_efficiency.py` | Dimension curves | Tidy tables, log₂ AUC, dimension-to-reach | ✅ |
+| `metrics/dimension_efficiency.py` | Dimension curves | Tidy tables, seed-averaged `DimensionCurve`s, log₂ AUC, dimension-to-reach in either direction, efficiency table consumed by the report | ✅ |
 | `models/encoders/vjepa2.py` | V-JEPA 2-AC via torch.hub | Loads `vjepa2_ac_vit_giant` code from hub and Meta's `vjepa2-ac-vitg.pt` from the official URL; encodes each frame as Meta's inference code does (2-frame tubelet, layer-normed tokens); returns patch and pooled embeddings; `assert_frozen` on encoder and reference predictor; refuses partially loaded checkpoints; accepts a local clone path for air-gapped machines; validated against Meta's upstream code at the pinned commit (random init: 1012M-param ViT-g, 256 tokens per 256 px frame, 305M-param reference predictor, all frozen); Meta's weights not yet run (`uv sync --extra vjepa2` provides `timm` for hub) | 🚧 |
 | `models/encoders/` | Encoder contract | `EncoderOutput(patch, pooled)`; `train()` is a no-op; synthetic encoder for CI; DINOv2 patch + CLS/mean pooling | ✅ |
 | `models/predictors/` | Heads | Identical architecture by construction (same seed gives identical weights; `architecture_signature` equal); action embedding concatenated to state coordinates; geodesic units in every geometry (Poincaré and Lorentz heads are isometric twins); `max_step` and `max_radius` guards shared; `HyperbolicHead(Euclidean)` equals `EuclideanHead` exactly | ✅ |
 | `models/registry.py` | Config → objects | Refuses `frozen: false`; checks `embed_dim` against the loaded encoder | ✅ |
 | `data/hierarchies.py` | Metadata → tree | Hop-count metric is 0-hyperbolic (used as the δ reference) | ✅ |
-| `data/synthetic.py` | CI trajectories | Deterministic, learnable linear dynamics, two-level hierarchy in metadata | ✅ |
+| `data/synthetic.py` | CI trajectories | Deterministic, learnable linear dynamics, two-level hierarchy in metadata; `n_branches` groups episodes into prompts sharing a start frame (`branch_pairs`) so all four tasks run on CPU | ✅ |
 | `data/droid.py` | DROID | Action stats and chunking done; loader raises `NotImplementedError` with plan | 🚧 |
 | `data/cosmos3/generate.py` | Cosmos 3 rollouts | Standalone batch script: start frames + action JSON → `frames.npz`, `meta.json`, optional mp4, `manifest.jsonl`; per-branch deterministic seeds; idempotent; `--dry-run` plan; `Cosmos3Generator` drives cosmos-framework's `forward_dynamics` mode (Cosmos3-Nano, `droid_lerobot` 10-D actions) with one invocation per chunk level, zero padding, per-chunk seeds, autoregressive chaining and stitching so frame t+1 is the result of action t; mp4 via ffmpeg; not run on a real model | 🚧 |
 | `data/cosmos3/extract_latents.py` | Tokenizer latents | Cosmos 3 vision-VAE adapter (4x temporal, 16x spatial; pads T to 4n+1, crops to multiples of 16, `[-1, 1]` input, encoder only); mean or flatten pooling to `(T', D)`; float16 npz + meta; manifest updated; idempotent | 🚧 |
 | `data/cosmos3/dataset.py` | Generated-trajectory loader | Manifest-driven windows in the shared batch format; bilinear resize; `branches`/`branch_pairs` for long-horizon consistency; `split_by_combination` for compositional generalisation (refuses splits that remove an embodiment or primitive); `latents(idx)`; deterministic train/val/test by prompt hash | ✅ |
-| `tasks/latent_rollout.py` | Rollout task | Native-geometry error vs horizon with static baseline; curves to CSV | ✅ |
-| `tasks/hierarchy_reconstruction.py`, `long_horizon_consistency.py`, `compositional_generalization.py` | Remaining tasks | Hypotheses and falsification criteria documented; `run()` pending phase 2 | 🚧 |
-| `training/train_predictor.py` | Hydra entry point | Head-only optimisation; frozen assert before first step and every save; geometry + curvature in every output | ✅ |
+| `tasks/base.py` | Task interface | `TaskResult` always carries geometry and curvature; `iter_embedded` streams any dataset through the frozen encoder and the head's embedding (asserts frozen); `frechet_mean` pools on the manifold by Riemannian descent with a backtracking line search (stationary, minimises the squared-distance objective, isometry-invariant between ball and hyperboloid, arithmetic mean in flat space); `spearman` | ✅ |
+| `tasks/latent_rollout.py` | Rollout task | Native-geometry error vs horizon with the static baseline; normalised error exactly 1 for a static head in every geometry; `evaluate` over index subsets reused by the compositional task; curves to CSV | ✅ |
+| `tasks/hierarchy_reconstruction.py` | Hierarchy task | Trajectories pooled over time and tree nodes over their subtrees by Fréchet mean; distortion, mAP and Spearman(depth, `dist0`) in the head's geometry; bootstrap resampling within leaves for `*_std`; perfect on a perfectly embedded chain; per-depth `dist0` curve | ✅ |
+| `tasks/long_horizon_consistency.py` | Branching task | Rollouts of two branches from the shared start latent; geodesic latent divergence vs the frozen encoder's divergence (its own Euclidean space) and pixel RMSE; pooled and per-horizon Spearman; saturation horizon; embedded-latent divergence as a control; requires `branch_pairs()` and checks the start frames match; matches a manual computation | ✅ |
+| `tasks/compositional_generalization.py` | Held-out task | Uses the dataset's `split_by_combination` or its metadata with the same safety checks (missing pair, removed embodiment/primitive); seen and unseen rollout summaries, gaps in raw and normalised error; refuses an empty holdout; the trainer excludes the held-out pairs from training | ✅ |
+| `training/train_predictor.py` | Hydra entry point | Head-only optimisation; frozen assert before first step and every save; tasks built before training so a bad task config fails fast; trains on the seen combinations when `data.holdout_combinations` is set; geometry, curvature, latent dim, seed and `n_train` in every output; output directories include the seed | ✅ |
 | `training/riemannian_optim.py` | Optimiser | Auto-selects `RiemannianAdam` when any `ManifoldParameter` exists | ✅ |
-| `reporting/` | Tables and figures | Pure function of `outputs/`; deterministic | ✅ |
+| `reporting/` | Tables and figures | One command (`scripts/make_report.sh`) regenerates: every-run results, summary (mean ± std over seeds), a curvature-sweep grid per swept metric, best-curvature-vs-Euclidean with the one-std rule (needs ≥ 2 seeds), dimension efficiency (log₂ AUC, dimension to reach the flat baseline), figures per swept metric, per dimension curve and per task's curves, plus an index; stale files removed; byte-identical on rerun (tested) | ✅ |
 
 ---
 
@@ -332,360 +340,465 @@ uv run pytest -v
 
 ```text
 ============================= test session starts ==============================
+collecting ... collected 453 items
 
 tests/data/test_cosmos3.py::test_load_action_spec_validates PASSED       [  0%]
 tests/data/test_cosmos3.py::test_branch_seed_is_deterministic_and_distinct PASSED [  0%]
 tests/data/test_cosmos3.py::test_generate_rollouts_writes_frames_meta_and_manifest PASSED [  0%]
-tests/data/test_cosmos3.py::test_write_rollout_rejects_bad_frames PASSED [  1%]
+tests/data/test_cosmos3.py::test_write_rollout_rejects_bad_frames PASSED [  0%]
 tests/data/test_cosmos3.py::test_cli_dry_run_and_injected_generator PASSED [  1%]
 tests/data/test_cosmos3.py::test_default_root_follows_data_root PASSED   [  1%]
-tests/data/test_cosmos3.py::test_cosmos3_generator_wavefront_chunking_samples_and_stitching PASSED [  2%]
-tests/data/test_cosmos3.py::test_cosmos3_generator_validation_and_command PASSED [  2%]
-tests/data/test_cosmos3.py::test_run_framework_without_the_package_raises_actionable_error PASSED [  2%]
+tests/data/test_cosmos3.py::test_cosmos3_generator_wavefront_chunking_samples_and_stitching PASSED [  1%]
+tests/data/test_cosmos3.py::test_cosmos3_generator_validation_and_command PASSED [  1%]
+tests/data/test_cosmos3.py::test_run_framework_without_the_package_raises_actionable_error PASSED [  1%]
 tests/data/test_cosmos3.py::test_video_helpers_without_ffmpeg PASSED     [  2%]
-tests/data/test_cosmos3.py::test_video_helpers_round_trip_with_ffmpeg SKIPPED [  3%]
-tests/data/test_cosmos3.py::test_generate_rollouts_uses_the_batch_path PASSED [  3%]
-tests/data/test_cosmos3.py::test_pool_latent_and_extract PASSED          [  3%]
-tests/data/test_cosmos3.py::test_cosmos3_tokenizer_backend_prepares_and_encodes PASSED [  4%]
-tests/data/test_cosmos3.py::test_load_cosmos3_model_without_framework_raises_actionable_error PASSED [  4%]
-tests/data/test_cosmos3.py::test_dataset_windows_shapes_and_meta PASSED  [  4%]
-tests/data/test_cosmos3.py::test_dataset_branches_and_pairs_share_start_frames PASSED [  4%]
-tests/data/test_cosmos3.py::test_dataset_compositional_split_and_hierarchy PASSED [  5%]
-tests/data/test_cosmos3.py::test_dataset_splits_and_config PASSED        [  5%]
-tests/geometry/test_base.py::test_registry_covers_every_case_and_build_manifold_accepts_both_keys PASSED [  5%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[euclidean-f32] PASSED [  6%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[euclidean-f64] PASSED [  6%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-1)-f32] PASSED [  6%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-1)-f64] PASSED [  6%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-0.5)-f32] PASSED [  7%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-0.5)-f64] PASSED [  7%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-2)-f32] PASSED [  7%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-2)-f64] PASSED [  8%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-1)-f32] PASSED [  8%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-1)-f64] PASSED [  8%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-0.5)-f32] PASSED [  8%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-0.5)-f64] PASSED [  9%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-2)-f32] PASSED [  9%]
-tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-2)-f64] PASSED [  9%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[euclidean] PASSED [ 10%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[poincare(c=-1)] PASSED [ 10%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[poincare(c=-0.5)] PASSED [ 10%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[poincare(c=-2)] PASSED [ 10%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[lorentz(c=-1)] PASSED [ 11%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[lorentz(c=-0.5)] PASSED [ 11%]
-tests/geometry/test_base.py::test_curvature_name_offset_and_repr[lorentz(c=-2)] PASSED [ 11%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[euclidean-f32] PASSED [ 12%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[euclidean-f64] PASSED [ 12%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-1)-f32] PASSED [ 12%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-1)-f64] PASSED [ 12%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-0.5)-f32] PASSED [ 13%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-0.5)-f64] PASSED [ 13%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-2)-f32] PASSED [ 13%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-2)-f64] PASSED [ 14%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-1)-f32] PASSED [ 14%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-1)-f64] PASSED [ 14%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-0.5)-f32] PASSED [ 14%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-0.5)-f64] PASSED [ 15%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-2)-f32] PASSED [ 15%]
-tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-2)-f64] PASSED [ 15%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[euclidean-f32] PASSED [ 16%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[euclidean-f64] PASSED [ 16%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-1)-f32] PASSED [ 16%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-1)-f64] PASSED [ 16%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-0.5)-f32] PASSED [ 17%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-0.5)-f64] PASSED [ 17%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-2)-f32] PASSED [ 17%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-2)-f64] PASSED [ 18%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-1)-f32] PASSED [ 18%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-1)-f64] PASSED [ 18%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-0.5)-f32] PASSED [ 18%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-0.5)-f64] PASSED [ 19%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-2)-f32] PASSED [ 19%]
-tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-2)-f64] PASSED [ 19%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[euclidean-f32] PASSED [ 20%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[euclidean-f64] PASSED [ 20%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-1)-f32] PASSED [ 20%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-1)-f64] PASSED [ 20%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-0.5)-f32] PASSED [ 21%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-0.5)-f64] PASSED [ 21%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-2)-f32] PASSED [ 21%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-2)-f64] PASSED [ 22%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-1)-f32] PASSED [ 22%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-1)-f64] PASSED [ 22%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-0.5)-f32] PASSED [ 22%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-0.5)-f64] PASSED [ 23%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-2)-f32] PASSED [ 23%]
-tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-2)-f64] PASSED [ 23%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[euclidean-f32] PASSED [ 24%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[euclidean-f64] PASSED [ 24%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-1)-f32] PASSED [ 24%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-1)-f64] PASSED [ 24%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-0.5)-f32] PASSED [ 25%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-0.5)-f64] PASSED [ 25%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-2)-f32] PASSED [ 25%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-2)-f64] PASSED [ 26%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-1)-f32] PASSED [ 26%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-1)-f64] PASSED [ 26%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-0.5)-f32] PASSED [ 26%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-0.5)-f64] PASSED [ 27%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-2)-f32] PASSED [ 27%]
-tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-2)-f64] PASSED [ 27%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[euclidean-f32] PASSED [ 28%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[euclidean-f64] PASSED [ 28%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-1)-f32] PASSED [ 28%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-1)-f64] PASSED [ 28%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-0.5)-f32] PASSED [ 29%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-0.5)-f64] PASSED [ 29%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-2)-f32] PASSED [ 29%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-2)-f64] PASSED [ 30%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-1)-f32] PASSED [ 30%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-1)-f64] PASSED [ 30%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-0.5)-f32] PASSED [ 30%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-0.5)-f64] PASSED [ 31%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-2)-f32] PASSED [ 31%]
-tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-2)-f64] PASSED [ 31%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[euclidean-f32] PASSED [ 32%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[euclidean-f64] PASSED [ 32%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-1)-f32] PASSED [ 32%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-1)-f64] PASSED [ 32%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-0.5)-f32] PASSED [ 33%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-0.5)-f64] PASSED [ 33%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-2)-f32] PASSED [ 33%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-2)-f64] PASSED [ 34%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-1)-f32] PASSED [ 34%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-1)-f64] PASSED [ 34%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-0.5)-f32] PASSED [ 34%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-0.5)-f64] PASSED [ 35%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-2)-f32] PASSED [ 35%]
-tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-2)-f64] PASSED [ 35%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[euclidean-f32] PASSED [ 36%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[euclidean-f64] PASSED [ 36%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-1)-f32] PASSED [ 36%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-1)-f64] PASSED [ 36%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-0.5)-f32] PASSED [ 37%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-0.5)-f64] PASSED [ 37%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-2)-f32] PASSED [ 37%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-2)-f64] PASSED [ 38%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-1)-f32] PASSED [ 38%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-1)-f64] PASSED [ 38%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-0.5)-f32] PASSED [ 38%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-0.5)-f64] PASSED [ 39%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-2)-f32] PASSED [ 39%]
-tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-2)-f64] PASSED [ 39%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[euclidean-f32] PASSED [ 40%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[euclidean-f64] PASSED [ 40%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-1)-f32] PASSED [ 40%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-1)-f64] PASSED [ 40%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-0.5)-f32] PASSED [ 41%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-0.5)-f64] PASSED [ 41%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-2)-f32] PASSED [ 41%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-2)-f64] PASSED [ 42%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-1)-f32] PASSED [ 42%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-1)-f64] PASSED [ 42%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-0.5)-f32] PASSED [ 42%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-0.5)-f64] PASSED [ 43%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-2)-f32] PASSED [ 43%]
-tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-2)-f64] PASSED [ 43%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[euclidean-f32] PASSED [ 44%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[euclidean-f64] PASSED [ 44%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-1)-f32] PASSED [ 44%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-1)-f64] PASSED [ 44%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-0.5)-f32] PASSED [ 45%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-0.5)-f64] PASSED [ 45%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-2)-f32] PASSED [ 45%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-2)-f64] PASSED [ 46%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-1)-f32] PASSED [ 46%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-1)-f64] PASSED [ 46%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-0.5)-f32] PASSED [ 46%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-0.5)-f64] PASSED [ 47%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-2)-f32] PASSED [ 47%]
-tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-2)-f64] PASSED [ 47%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[euclidean-f32] PASSED [ 48%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[euclidean-f64] PASSED [ 48%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-1)-f32] PASSED [ 48%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-1)-f64] PASSED [ 48%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-0.5)-f32] PASSED [ 49%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-0.5)-f64] PASSED [ 49%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-2)-f32] PASSED [ 49%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-2)-f64] PASSED [ 50%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-1)-f32] PASSED [ 50%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-1)-f64] PASSED [ 50%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-0.5)-f32] PASSED [ 51%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-0.5)-f64] PASSED [ 51%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-2)-f32] PASSED [ 51%]
-tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-2)-f64] PASSED [ 51%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[euclidean] PASSED [ 52%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[poincare(c=-1)] PASSED [ 52%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[poincare(c=-0.5)] PASSED [ 52%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[poincare(c=-2)] PASSED [ 53%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[lorentz(c=-1)] PASSED [ 53%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[lorentz(c=-0.5)] PASSED [ 53%]
-tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[lorentz(c=-2)] PASSED [ 53%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[euclidean] PASSED [ 54%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[poincare(c=-1)] PASSED [ 54%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[poincare(c=-0.5)] PASSED [ 54%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[poincare(c=-2)] PASSED [ 55%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[lorentz(c=-1)] PASSED [ 55%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[lorentz(c=-0.5)] PASSED [ 55%]
-tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[lorentz(c=-2)] PASSED [ 55%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[euclidean-f32] PASSED [ 56%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[euclidean-f64] PASSED [ 56%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-1)-f32] PASSED [ 56%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-1)-f64] PASSED [ 57%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-0.5)-f32] PASSED [ 57%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-0.5)-f64] PASSED [ 57%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-2)-f32] PASSED [ 57%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-2)-f64] PASSED [ 58%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-1)-f32] PASSED [ 58%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-1)-f64] PASSED [ 58%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-0.5)-f32] PASSED [ 59%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-0.5)-f64] PASSED [ 59%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-2)-f32] PASSED [ 59%]
-tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-2)-f64] PASSED [ 59%]
-tests/geometry/test_euclidean.py::test_construction_and_curvature PASSED [ 60%]
-tests/geometry/test_euclidean.py::test_primitives_reduce_to_vector_arithmetic[f32] PASSED [ 60%]
-tests/geometry/test_euclidean.py::test_primitives_reduce_to_vector_arithmetic[f64] PASSED [ 60%]
-tests/geometry/test_euclidean.py::test_geodesic_pairwise_and_check_point PASSED [ 61%]
-tests/geometry/test_euclidean.py::test_gradients_match_finite_differences PASSED [ 61%]
-tests/geometry/test_euclidean.py::test_to_geoopt_and_repr PASSED         [ 61%]
-tests/geometry/test_lorentz.py::test_construction_k_and_geoopt_parameter[-0.5] PASSED [ 61%]
-tests/geometry/test_lorentz.py::test_construction_k_and_geoopt_parameter[-1.0] PASSED [ 62%]
-tests/geometry/test_lorentz.py::test_construction_k_and_geoopt_parameter[-2.0] PASSED [ 62%]
-tests/geometry/test_lorentz.py::test_minkowski_inner_and_inner[f32] PASSED [ 62%]
-tests/geometry/test_lorentz.py::test_minkowski_inner_and_inner[f64] PASSED [ 63%]
-tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f32--0.5] PASSED [ 63%]
-tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f32--1.0] PASSED [ 63%]
-tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f32--2.0] PASSED [ 63%]
-tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f64--0.5] PASSED [ 64%]
-tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f64--1.0] PASSED [ 64%]
-tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f64--2.0] PASSED [ 64%]
-tests/geometry/test_lorentz.py::test_logmap_is_tangent_and_dist_is_its_length[-0.5] PASSED [ 65%]
-tests/geometry/test_lorentz.py::test_logmap_is_tangent_and_dist_is_its_length[-1.0] PASSED [ 65%]
-tests/geometry/test_lorentz.py::test_logmap_is_tangent_and_dist_is_its_length[-2.0] PASSED [ 65%]
-tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f32--0.5] PASSED [ 65%]
-tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f32--1.0] PASSED [ 66%]
-tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f32--2.0] PASSED [ 66%]
-tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f64--0.5] PASSED [ 66%]
-tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f64--1.0] PASSED [ 67%]
-tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f64--2.0] PASSED [ 67%]
-tests/geometry/test_lorentz.py::test_isometry_to_poincare_ball[-0.5] PASSED [ 67%]
-tests/geometry/test_lorentz.py::test_isometry_to_poincare_ball[-1.0] PASSED [ 67%]
-tests/geometry/test_lorentz.py::test_isometry_to_poincare_ball[-2.0] PASSED [ 68%]
-tests/geometry/test_lorentz.py::test_gradients_match_finite_differences[-0.5] PASSED [ 68%]
-tests/geometry/test_lorentz.py::test_gradients_match_finite_differences[-1.0] PASSED [ 68%]
-tests/geometry/test_lorentz.py::test_gradients_match_finite_differences[-2.0] PASSED [ 69%]
-tests/geometry/test_lorentz.py::test_tangent_lift_and_euclidean_projection PASSED [ 69%]
-tests/geometry/test_lorentz.py::test_float32_vs_float64_at_the_image_of_0999_radius[-1.0] PASSED [ 69%]
-tests/geometry/test_lorentz.py::test_float32_vs_float64_at_the_image_of_0999_radius[-2.0] PASSED [ 69%]
-tests/geometry/test_poincare.py::test_construction_radius_and_geoopt_parameter[-0.5] PASSED [ 70%]
-tests/geometry/test_poincare.py::test_construction_radius_and_geoopt_parameter[-1.0] PASSED [ 70%]
-tests/geometry/test_poincare.py::test_construction_radius_and_geoopt_parameter[-2.0] PASSED [ 70%]
-tests/geometry/test_poincare.py::test_lambda_x_closed_form[f32--0.5] PASSED [ 71%]
-tests/geometry/test_poincare.py::test_lambda_x_closed_form[f32--1.0] PASSED [ 71%]
-tests/geometry/test_poincare.py::test_lambda_x_closed_form[f32--2.0] PASSED [ 71%]
-tests/geometry/test_poincare.py::test_lambda_x_closed_form[f64--0.5] PASSED [ 71%]
-tests/geometry/test_poincare.py::test_lambda_x_closed_form[f64--1.0] PASSED [ 72%]
-tests/geometry/test_poincare.py::test_lambda_x_closed_form[f64--2.0] PASSED [ 72%]
-tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f32--0.5] PASSED [ 72%]
-tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f32--1.0] PASSED [ 73%]
-tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f32--2.0] PASSED [ 73%]
-tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f64--0.5] PASSED [ 73%]
-tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f64--1.0] PASSED [ 73%]
-tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f64--2.0] PASSED [ 74%]
-tests/geometry/test_poincare.py::test_gyration_is_an_isometry_and_trivial_at_zero[-0.5] PASSED [ 74%]
-tests/geometry/test_poincare.py::test_gyration_is_an_isometry_and_trivial_at_zero[-1.0] PASSED [ 74%]
-tests/geometry/test_poincare.py::test_gyration_is_an_isometry_and_trivial_at_zero[-2.0] PASSED [ 75%]
-tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f32--0.5] PASSED [ 75%]
-tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f32--1.0] PASSED [ 75%]
-tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f32--2.0] PASSED [ 75%]
-tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f64--0.5] PASSED [ 76%]
-tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f64--1.0] PASSED [ 76%]
-tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f64--2.0] PASSED [ 76%]
-tests/geometry/test_poincare.py::test_distance_closed_form_from_origin PASSED [ 77%]
-tests/geometry/test_poincare.py::test_gradients_match_finite_differences[-0.5] PASSED [ 77%]
-tests/geometry/test_poincare.py::test_gradients_match_finite_differences[-1.0] PASSED [ 77%]
-tests/geometry/test_poincare.py::test_gradients_match_finite_differences[-2.0] PASSED [ 77%]
-tests/geometry/test_poincare.py::test_proj_clips_to_boundary[f32] PASSED [ 78%]
-tests/geometry/test_poincare.py::test_proj_clips_to_boundary[f64] PASSED [ 78%]
-tests/geometry/test_poincare.py::test_float32_vs_float64_at_0999_of_the_boundary_radius[-1.0] PASSED [ 78%]
-tests/geometry/test_poincare.py::test_float32_vs_float64_at_0999_of_the_boundary_radius[-2.0] PASSED [ 79%]
-tests/geometry/test_poincare.py::test_float32_round_trip_holds_inside_the_clip_margin[-1.0] PASSED [ 79%]
-tests/geometry/test_poincare.py::test_float32_round_trip_holds_inside_the_clip_margin[-2.0] PASSED [ 79%]
-tests/geometry/test_public_api.py::test_every_public_name_is_referenced_by_a_geometry_test PASSED [ 79%]
-tests/geometry/test_public_api.py::test_public_api_is_non_trivial PASSED [ 80%]
-tests/geometry/test_utils.py::test_eps_and_min_norm_tables PASSED        [ 80%]
-tests/geometry/test_utils.py::test_artanh_matches_torch_inside_and_is_finite_at_the_boundary[f32] PASSED [ 80%]
-tests/geometry/test_utils.py::test_artanh_matches_torch_inside_and_is_finite_at_the_boundary[f64] PASSED [ 81%]
-tests/geometry/test_utils.py::test_arcosh_matches_torch_and_is_finite_at_one[f32] PASSED [ 81%]
-tests/geometry/test_utils.py::test_arcosh_matches_torch_and_is_finite_at_one[f64] PASSED [ 81%]
-tests/geometry/test_utils.py::test_safe_norm_never_returns_zero[f32] PASSED [ 81%]
-tests/geometry/test_utils.py::test_safe_norm_never_returns_zero[f64] PASSED [ 82%]
-tests/geometry/test_utils.py::test_clip_norm_only_shrinks[f32] PASSED    [ 82%]
-tests/geometry/test_utils.py::test_clip_norm_only_shrinks[f64] PASSED    [ 82%]
-tests/geometry/test_utils.py::test_helpers_keep_shape[artanh] PASSED     [ 83%]
-tests/geometry/test_utils.py::test_helpers_keep_shape[arcosh] PASSED     [ 83%]
-tests/metrics/test_distortion.py::test_perfect_embedding_has_zero_distortion_and_unit_map PASSED [ 83%]
-tests/metrics/test_distortion.py::test_random_embedding_is_worse_than_structured PASSED [ 83%]
-tests/metrics/test_distortion.py::test_shape_validation PASSED           [ 84%]
-tests/metrics/test_gromov_hyperbolicity.py::test_tree_metric_has_zero_delta PASSED [ 84%]
-tests/metrics/test_gromov_hyperbolicity.py::test_grid_has_positive_delta PASSED [ 84%]
-tests/metrics/test_gromov_hyperbolicity.py::test_delta_is_scale_covariant PASSED [ 85%]
-tests/metrics/test_gromov_hyperbolicity.py::test_subsampled_estimator_on_point_clouds PASSED [ 85%]
-tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[euclidean] PASSED [ 85%]
-tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-on-euclidean] PASSED [ 85%]
-tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-poincare] PASSED [ 86%]
-tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-poincare(c=-0.5)] PASSED [ 86%]
-tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-lorentz] PASSED [ 86%]
-tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[euclidean] PASSED [ 87%]
-tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-on-euclidean] PASSED [ 87%]
-tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-poincare] PASSED [ 87%]
-tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-poincare(c=-0.5)] PASSED [ 87%]
-tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-lorentz] PASSED [ 88%]
-tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[euclidean] PASSED [ 88%]
-tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-on-euclidean] PASSED [ 88%]
-tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-poincare] PASSED [ 89%]
-tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-poincare(c=-0.5)] PASSED [ 89%]
-tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-lorentz] PASSED [ 89%]
-tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[euclidean] PASSED [ 89%]
-tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-on-euclidean] PASSED [ 90%]
-tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-poincare] PASSED [ 90%]
-tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-poincare(c=-0.5)] PASSED [ 90%]
-tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-lorentz] PASSED [ 91%]
-tests/models/test_predictor_heads.py::test_heads_are_architecturally_identical PASSED [ 91%]
-tests/models/test_predictor_heads.py::test_same_seed_gives_identical_initial_weights_and_different_seeds_differ PASSED [ 91%]
-tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[euclidean] PASSED [ 91%]
-tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-on-euclidean] PASSED [ 92%]
-tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-poincare] PASSED [ 92%]
-tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-poincare(c=-0.5)] PASSED [ 92%]
-tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-lorentz] PASSED [ 93%]
-tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[euclidean] PASSED [ 93%]
-tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-on-euclidean] PASSED [ 93%]
-tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-poincare] PASSED [ 93%]
-tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-poincare(c=-0.5)] PASSED [ 94%]
-tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-lorentz] PASSED [ 94%]
-tests/models/test_predictor_heads.py::test_poincare_and_lorentz_heads_are_isometric_twins PASSED [ 94%]
-tests/models/test_predictor_heads.py::test_hyperbolic_head_on_euclidean_manifold_equals_euclidean_head PASSED [ 95%]
-tests/models/test_predictor_heads.py::test_embedding_uses_expmap0_and_is_frozen PASSED [ 95%]
-tests/models/test_predictor_heads.py::test_euclidean_head_rejects_curved_manifold_and_registry_builds_both PASSED [ 95%]
-tests/models/test_vjepa2.py::test_loader_uses_torch_hub_entry_and_freezes_everything PASSED [ 95%]
-tests/models/test_vjepa2.py::test_encoder_forward_returns_patch_and_pooled_embeddings PASSED [ 96%]
-tests/models/test_vjepa2.py::test_normalize_reps_off_keeps_raw_tokens PASSED [ 96%]
-tests/models/test_vjepa2.py::test_assert_frozen_catches_a_thawed_parameter PASSED [ 96%]
-tests/models/test_vjepa2.py::test_reference_predictor_shapes_rollout_and_loss PASSED [ 97%]
-tests/models/test_vjepa2.py::test_pretrained_path_cleans_keys_and_loads_strictly PASSED [ 97%]
-tests/models/test_vjepa2.py::test_local_checkout_path_uses_hub_local_source PASSED [ 97%]
-tests/models/test_vjepa2.py::test_missing_hub_dependencies_produce_an_actionable_error PASSED [ 97%]
-tests/models/test_vjepa2.py::test_registry_builds_vjepa2_ac_bundle_with_reference_predictor PASSED [ 98%]
+tests/data/test_cosmos3.py::test_video_helpers_round_trip_with_ffmpeg SKIPPED [  2%]
+tests/data/test_cosmos3.py::test_generate_rollouts_uses_the_batch_path PASSED [  2%]
+tests/data/test_cosmos3.py::test_pool_latent_and_extract PASSED          [  2%]
+tests/data/test_cosmos3.py::test_cosmos3_tokenizer_backend_prepares_and_encodes PASSED [  3%]
+tests/data/test_cosmos3.py::test_load_cosmos3_model_without_framework_raises_actionable_error PASSED [  3%]
+tests/data/test_cosmos3.py::test_dataset_windows_shapes_and_meta PASSED  [  3%]
+tests/data/test_cosmos3.py::test_dataset_branches_and_pairs_share_start_frames PASSED [  3%]
+tests/data/test_cosmos3.py::test_dataset_compositional_split_and_hierarchy PASSED [  3%]
+tests/data/test_cosmos3.py::test_dataset_splits_and_config PASSED        [  4%]
+tests/geometry/test_base.py::test_registry_covers_every_case_and_build_manifold_accepts_both_keys PASSED [  4%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[euclidean-f32] PASSED [  4%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[euclidean-f64] PASSED [  4%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-1)-f32] PASSED [  5%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-1)-f64] PASSED [  5%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-0.5)-f32] PASSED [  5%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-0.5)-f64] PASSED [  5%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-2)-f32] PASSED [  5%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[poincare(c=-2)-f64] PASSED [  6%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-1)-f32] PASSED [  6%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-1)-f64] PASSED [  6%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-0.5)-f32] PASSED [  6%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-0.5)-f64] PASSED [  7%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-2)-f32] PASSED [  7%]
+tests/geometry/test_base.py::test_lambda0_is_the_origin_metric_scale[lorentz(c=-2)-f64] PASSED [  7%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[euclidean] PASSED [  7%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[poincare(c=-1)] PASSED [  7%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[poincare(c=-0.5)] PASSED [  8%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[poincare(c=-2)] PASSED [  8%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[lorentz(c=-1)] PASSED [  8%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[lorentz(c=-0.5)] PASSED [  8%]
+tests/geometry/test_base.py::test_curvature_name_offset_and_repr[lorentz(c=-2)] PASSED [  9%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[euclidean-f32] PASSED [  9%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[euclidean-f64] PASSED [  9%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-1)-f32] PASSED [  9%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-1)-f64] PASSED [  9%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-0.5)-f32] PASSED [ 10%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-0.5)-f64] PASSED [ 10%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-2)-f32] PASSED [ 10%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[poincare(c=-2)-f64] PASSED [ 10%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-1)-f32] PASSED [ 11%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-1)-f64] PASSED [ 11%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-0.5)-f32] PASSED [ 11%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-0.5)-f64] PASSED [ 11%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-2)-f32] PASSED [ 11%]
+tests/geometry/test_base.py::test_expmap_logmap_are_inverse[lorentz(c=-2)-f64] PASSED [ 12%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[euclidean-f32] PASSED [ 12%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[euclidean-f64] PASSED [ 12%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-1)-f32] PASSED [ 12%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-1)-f64] PASSED [ 13%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-0.5)-f32] PASSED [ 13%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-0.5)-f64] PASSED [ 13%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-2)-f32] PASSED [ 13%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[poincare(c=-2)-f64] PASSED [ 13%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-1)-f32] PASSED [ 14%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-1)-f64] PASSED [ 14%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-0.5)-f32] PASSED [ 14%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-0.5)-f64] PASSED [ 14%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-2)-f32] PASSED [ 15%]
+tests/geometry/test_base.py::test_distance_is_a_metric_on_random_points[lorentz(c=-2)-f64] PASSED [ 15%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[euclidean-f32] PASSED [ 15%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[euclidean-f64] PASSED [ 15%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-1)-f32] PASSED [ 15%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-1)-f64] PASSED [ 16%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-0.5)-f32] PASSED [ 16%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-0.5)-f64] PASSED [ 16%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-2)-f32] PASSED [ 16%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[poincare(c=-2)-f64] PASSED [ 16%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-1)-f32] PASSED [ 17%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-1)-f64] PASSED [ 17%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-0.5)-f32] PASSED [ 17%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-0.5)-f64] PASSED [ 17%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-2)-f32] PASSED [ 18%]
+tests/geometry/test_base.py::test_sqdist_dist0_and_pairwise_are_consistent_with_dist[lorentz(c=-2)-f64] PASSED [ 18%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[euclidean-f32] PASSED [ 18%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[euclidean-f64] PASSED [ 18%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-1)-f32] PASSED [ 18%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-1)-f64] PASSED [ 19%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-0.5)-f32] PASSED [ 19%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-0.5)-f64] PASSED [ 19%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-2)-f32] PASSED [ 19%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[poincare(c=-2)-f64] PASSED [ 20%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-1)-f32] PASSED [ 20%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-1)-f64] PASSED [ 20%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-0.5)-f32] PASSED [ 20%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-0.5)-f64] PASSED [ 20%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-2)-f32] PASSED [ 21%]
+tests/geometry/test_base.py::test_origin_closed_forms_match_general_maps[lorentz(c=-2)-f64] PASSED [ 21%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[euclidean-f32] PASSED [ 21%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[euclidean-f64] PASSED [ 21%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-1)-f32] PASSED [ 22%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-1)-f64] PASSED [ 22%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-0.5)-f32] PASSED [ 22%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-0.5)-f64] PASSED [ 22%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-2)-f32] PASSED [ 22%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[poincare(c=-2)-f64] PASSED [ 23%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-1)-f32] PASSED [ 23%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-1)-f64] PASSED [ 23%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-0.5)-f32] PASSED [ 23%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-0.5)-f64] PASSED [ 24%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-2)-f32] PASSED [ 24%]
+tests/geometry/test_base.py::test_geodesic_endpoints_and_midpoint[lorentz(c=-2)-f64] PASSED [ 24%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[euclidean-f32] PASSED [ 24%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[euclidean-f64] PASSED [ 24%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-1)-f32] PASSED [ 25%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-1)-f64] PASSED [ 25%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-0.5)-f32] PASSED [ 25%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-0.5)-f64] PASSED [ 25%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-2)-f32] PASSED [ 26%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[poincare(c=-2)-f64] PASSED [ 26%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-1)-f32] PASSED [ 26%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-1)-f64] PASSED [ 26%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-0.5)-f32] PASSED [ 26%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-0.5)-f64] PASSED [ 27%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-2)-f32] PASSED [ 27%]
+tests/geometry/test_base.py::test_proj_is_idempotent_and_returns_points_on_the_manifold[lorentz(c=-2)-f64] PASSED [ 27%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[euclidean-f32] PASSED [ 27%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[euclidean-f64] PASSED [ 28%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-1)-f32] PASSED [ 28%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-1)-f64] PASSED [ 28%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-0.5)-f32] PASSED [ 28%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-0.5)-f64] PASSED [ 28%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-2)-f32] PASSED [ 29%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[poincare(c=-2)-f64] PASSED [ 29%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-1)-f32] PASSED [ 29%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-1)-f64] PASSED [ 29%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-0.5)-f32] PASSED [ 30%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-0.5)-f64] PASSED [ 30%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-2)-f32] PASSED [ 30%]
+tests/geometry/test_base.py::test_proj_tan_is_idempotent_and_logmap_is_tangent[lorentz(c=-2)-f64] PASSED [ 30%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[euclidean-f32] PASSED [ 30%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[euclidean-f64] PASSED [ 31%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-1)-f32] PASSED [ 31%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-1)-f64] PASSED [ 31%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-0.5)-f32] PASSED [ 31%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-0.5)-f64] PASSED [ 32%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-2)-f32] PASSED [ 32%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[poincare(c=-2)-f64] PASSED [ 32%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-1)-f32] PASSED [ 32%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-1)-f64] PASSED [ 32%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-0.5)-f32] PASSED [ 33%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-0.5)-f64] PASSED [ 33%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-2)-f32] PASSED [ 33%]
+tests/geometry/test_base.py::test_ptransp_is_identity_at_the_same_point_and_reverses_the_geodesic[lorentz(c=-2)-f64] PASSED [ 33%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[euclidean-f32] PASSED [ 33%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[euclidean-f64] PASSED [ 34%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-1)-f32] PASSED [ 34%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-1)-f64] PASSED [ 34%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-0.5)-f32] PASSED [ 34%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-0.5)-f64] PASSED [ 35%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-2)-f32] PASSED [ 35%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[poincare(c=-2)-f64] PASSED [ 35%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-1)-f32] PASSED [ 35%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-1)-f64] PASSED [ 35%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-0.5)-f32] PASSED [ 36%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-0.5)-f64] PASSED [ 36%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-2)-f32] PASSED [ 36%]
+tests/geometry/test_base.py::test_egrad2rgrad_is_tangent_and_matches_geoopt[lorentz(c=-2)-f64] PASSED [ 36%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[euclidean-f32] PASSED [ 37%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[euclidean-f64] PASSED [ 37%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-1)-f32] PASSED [ 37%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-1)-f64] PASSED [ 37%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-0.5)-f32] PASSED [ 37%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-0.5)-f64] PASSED [ 38%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-2)-f32] PASSED [ 38%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[poincare(c=-2)-f64] PASSED [ 38%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-1)-f32] PASSED [ 38%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-1)-f64] PASSED [ 39%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-0.5)-f32] PASSED [ 39%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-0.5)-f64] PASSED [ 39%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-2)-f32] PASSED [ 39%]
+tests/geometry/test_base.py::test_tangent0_lift_round_trip[lorentz(c=-2)-f64] PASSED [ 39%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[euclidean] PASSED [ 40%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[poincare(c=-1)] PASSED [ 40%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[poincare(c=-0.5)] PASSED [ 40%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[poincare(c=-2)] PASSED [ 40%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[lorentz(c=-1)] PASSED [ 41%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[lorentz(c=-0.5)] PASSED [ 41%]
+tests/geometry/test_base.py::test_to_geoopt_returns_a_matching_manifold[lorentz(c=-2)] PASSED [ 41%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[euclidean] PASSED [ 41%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[poincare(c=-1)] PASSED [ 41%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[poincare(c=-0.5)] PASSED [ 42%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[poincare(c=-2)] PASSED [ 42%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[lorentz(c=-1)] PASSED [ 42%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[lorentz(c=-0.5)] PASSED [ 42%]
+tests/geometry/test_base.py::test_check_point_rejects_points_off_the_manifold[lorentz(c=-2)] PASSED [ 43%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[euclidean-f32] PASSED [ 43%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[euclidean-f64] PASSED [ 43%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-1)-f32] PASSED [ 43%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-1)-f64] PASSED [ 43%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-0.5)-f32] PASSED [ 44%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-0.5)-f64] PASSED [ 44%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-2)-f32] PASSED [ 44%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[poincare(c=-2)-f64] PASSED [ 44%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-1)-f32] PASSED [ 45%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-1)-f64] PASSED [ 45%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-0.5)-f32] PASSED [ 45%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-0.5)-f64] PASSED [ 45%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-2)-f32] PASSED [ 45%]
+tests/geometry/test_base.py::test_outputs_keep_input_dtype[lorentz(c=-2)-f64] PASSED [ 46%]
+tests/geometry/test_euclidean.py::test_construction_and_curvature PASSED [ 46%]
+tests/geometry/test_euclidean.py::test_primitives_reduce_to_vector_arithmetic[f32] PASSED [ 46%]
+tests/geometry/test_euclidean.py::test_primitives_reduce_to_vector_arithmetic[f64] PASSED [ 46%]
+tests/geometry/test_euclidean.py::test_geodesic_pairwise_and_check_point PASSED [ 47%]
+tests/geometry/test_euclidean.py::test_gradients_match_finite_differences PASSED [ 47%]
+tests/geometry/test_euclidean.py::test_to_geoopt_and_repr PASSED         [ 47%]
+tests/geometry/test_lorentz.py::test_construction_k_and_geoopt_parameter[-0.5] PASSED [ 47%]
+tests/geometry/test_lorentz.py::test_construction_k_and_geoopt_parameter[-1.0] PASSED [ 47%]
+tests/geometry/test_lorentz.py::test_construction_k_and_geoopt_parameter[-2.0] PASSED [ 48%]
+tests/geometry/test_lorentz.py::test_minkowski_inner_and_inner[f32] PASSED [ 48%]
+tests/geometry/test_lorentz.py::test_minkowski_inner_and_inner[f64] PASSED [ 48%]
+tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f32--0.5] PASSED [ 48%]
+tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f32--1.0] PASSED [ 49%]
+tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f32--2.0] PASSED [ 49%]
+tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f64--0.5] PASSED [ 49%]
+tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f64--1.0] PASSED [ 49%]
+tests/geometry/test_lorentz.py::test_points_and_origin_lie_on_the_hyperboloid[f64--2.0] PASSED [ 49%]
+tests/geometry/test_lorentz.py::test_logmap_is_tangent_and_dist_is_its_length[-0.5] PASSED [ 50%]
+tests/geometry/test_lorentz.py::test_logmap_is_tangent_and_dist_is_its_length[-1.0] PASSED [ 50%]
+tests/geometry/test_lorentz.py::test_logmap_is_tangent_and_dist_is_its_length[-2.0] PASSED [ 50%]
+tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f32--0.5] PASSED [ 50%]
+tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f32--1.0] PASSED [ 50%]
+tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f32--2.0] PASSED [ 51%]
+tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f64--0.5] PASSED [ 51%]
+tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f64--1.0] PASSED [ 51%]
+tests/geometry/test_lorentz.py::test_own_ptransp_matches_geoopt_and_is_finite_at_coincident_points[f64--2.0] PASSED [ 51%]
+tests/geometry/test_lorentz.py::test_isometry_to_poincare_ball[-0.5] PASSED [ 52%]
+tests/geometry/test_lorentz.py::test_isometry_to_poincare_ball[-1.0] PASSED [ 52%]
+tests/geometry/test_lorentz.py::test_isometry_to_poincare_ball[-2.0] PASSED [ 52%]
+tests/geometry/test_lorentz.py::test_gradients_match_finite_differences[-0.5] PASSED [ 52%]
+tests/geometry/test_lorentz.py::test_gradients_match_finite_differences[-1.0] PASSED [ 52%]
+tests/geometry/test_lorentz.py::test_gradients_match_finite_differences[-2.0] PASSED [ 53%]
+tests/geometry/test_lorentz.py::test_tangent_lift_and_euclidean_projection PASSED [ 53%]
+tests/geometry/test_lorentz.py::test_float32_vs_float64_at_the_image_of_0999_radius[-1.0] PASSED [ 53%]
+tests/geometry/test_lorentz.py::test_float32_vs_float64_at_the_image_of_0999_radius[-2.0] PASSED [ 53%]
+tests/geometry/test_poincare.py::test_construction_radius_and_geoopt_parameter[-0.5] PASSED [ 54%]
+tests/geometry/test_poincare.py::test_construction_radius_and_geoopt_parameter[-1.0] PASSED [ 54%]
+tests/geometry/test_poincare.py::test_construction_radius_and_geoopt_parameter[-2.0] PASSED [ 54%]
+tests/geometry/test_poincare.py::test_lambda_x_closed_form[f32--0.5] PASSED [ 54%]
+tests/geometry/test_poincare.py::test_lambda_x_closed_form[f32--1.0] PASSED [ 54%]
+tests/geometry/test_poincare.py::test_lambda_x_closed_form[f32--2.0] PASSED [ 55%]
+tests/geometry/test_poincare.py::test_lambda_x_closed_form[f64--0.5] PASSED [ 55%]
+tests/geometry/test_poincare.py::test_lambda_x_closed_form[f64--1.0] PASSED [ 55%]
+tests/geometry/test_poincare.py::test_lambda_x_closed_form[f64--2.0] PASSED [ 55%]
+tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f32--0.5] PASSED [ 56%]
+tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f32--1.0] PASSED [ 56%]
+tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f32--2.0] PASSED [ 56%]
+tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f64--0.5] PASSED [ 56%]
+tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f64--1.0] PASSED [ 56%]
+tests/geometry/test_poincare.py::test_mobius_add_identity_inverse_and_geoopt[f64--2.0] PASSED [ 57%]
+tests/geometry/test_poincare.py::test_gyration_is_an_isometry_and_trivial_at_zero[-0.5] PASSED [ 57%]
+tests/geometry/test_poincare.py::test_gyration_is_an_isometry_and_trivial_at_zero[-1.0] PASSED [ 57%]
+tests/geometry/test_poincare.py::test_gyration_is_an_isometry_and_trivial_at_zero[-2.0] PASSED [ 57%]
+tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f32--0.5] PASSED [ 58%]
+tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f32--1.0] PASSED [ 58%]
+tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f32--2.0] PASSED [ 58%]
+tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f64--0.5] PASSED [ 58%]
+tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f64--1.0] PASSED [ 58%]
+tests/geometry/test_poincare.py::test_ptransp_preserves_conformal_norm[f64--2.0] PASSED [ 59%]
+tests/geometry/test_poincare.py::test_distance_closed_form_from_origin PASSED [ 59%]
+tests/geometry/test_poincare.py::test_gradients_match_finite_differences[-0.5] PASSED [ 59%]
+tests/geometry/test_poincare.py::test_gradients_match_finite_differences[-1.0] PASSED [ 59%]
+tests/geometry/test_poincare.py::test_gradients_match_finite_differences[-2.0] PASSED [ 60%]
+tests/geometry/test_poincare.py::test_proj_clips_to_boundary[f32] PASSED [ 60%]
+tests/geometry/test_poincare.py::test_proj_clips_to_boundary[f64] PASSED [ 60%]
+tests/geometry/test_poincare.py::test_float32_vs_float64_at_0999_of_the_boundary_radius[-1.0] PASSED [ 60%]
+tests/geometry/test_poincare.py::test_float32_vs_float64_at_0999_of_the_boundary_radius[-2.0] PASSED [ 60%]
+tests/geometry/test_poincare.py::test_float32_round_trip_holds_inside_the_clip_margin[-1.0] PASSED [ 61%]
+tests/geometry/test_poincare.py::test_float32_round_trip_holds_inside_the_clip_margin[-2.0] PASSED [ 61%]
+tests/geometry/test_public_api.py::test_every_public_name_is_referenced_by_a_geometry_test PASSED [ 61%]
+tests/geometry/test_public_api.py::test_public_api_is_non_trivial PASSED [ 61%]
+tests/geometry/test_utils.py::test_eps_and_min_norm_tables PASSED        [ 62%]
+tests/geometry/test_utils.py::test_artanh_matches_torch_inside_and_is_finite_at_the_boundary[f32] PASSED [ 62%]
+tests/geometry/test_utils.py::test_artanh_matches_torch_inside_and_is_finite_at_the_boundary[f64] PASSED [ 62%]
+tests/geometry/test_utils.py::test_arcosh_matches_torch_and_is_finite_at_one[f32] PASSED [ 62%]
+tests/geometry/test_utils.py::test_arcosh_matches_torch_and_is_finite_at_one[f64] PASSED [ 62%]
+tests/geometry/test_utils.py::test_safe_norm_never_returns_zero[f32] PASSED [ 63%]
+tests/geometry/test_utils.py::test_safe_norm_never_returns_zero[f64] PASSED [ 63%]
+tests/geometry/test_utils.py::test_clip_norm_only_shrinks[f32] PASSED    [ 63%]
+tests/geometry/test_utils.py::test_clip_norm_only_shrinks[f64] PASSED    [ 63%]
+tests/geometry/test_utils.py::test_helpers_keep_shape[artanh] PASSED     [ 64%]
+tests/geometry/test_utils.py::test_helpers_keep_shape[arcosh] PASSED     [ 64%]
+tests/metrics/test_dimension_efficiency.py::test_dimension_curve_builds_a_sorted_long_table PASSED [ 64%]
+tests/metrics/test_dimension_efficiency.py::test_dimension_curve_validation PASSED [ 64%]
+tests/metrics/test_dimension_efficiency.py::test_curves_from_table_averages_seeds PASSED [ 64%]
+tests/metrics/test_dimension_efficiency.py::test_area_under_curve_on_log2_axis PASSED [ 65%]
+tests/metrics/test_dimension_efficiency.py::test_dimension_to_reach_in_both_directions PASSED [ 65%]
+tests/metrics/test_dimension_efficiency.py::test_efficiency_table_summarises_every_curve PASSED [ 65%]
+tests/metrics/test_distortion.py::test_perfect_embedding_has_zero_distortion_and_unit_map PASSED [ 65%]
+tests/metrics/test_distortion.py::test_random_embedding_is_worse_than_structured PASSED [ 66%]
+tests/metrics/test_distortion.py::test_shape_validation PASSED           [ 66%]
+tests/metrics/test_geodesic_error.py::test_error_is_the_manifold_distance[euclidean] PASSED [ 66%]
+tests/metrics/test_geodesic_error.py::test_error_is_the_manifold_distance[poincare] PASSED [ 66%]
+tests/metrics/test_geodesic_error.py::test_error_is_the_manifold_distance[poincare(c=-0.5)] PASSED [ 66%]
+tests/metrics/test_geodesic_error.py::test_error_is_the_manifold_distance[lorentz] PASSED [ 67%]
+tests/metrics/test_geodesic_error.py::test_rejects_anything_that_is_not_a_manifold PASSED [ 67%]
+tests/metrics/test_geodesic_error.py::test_module_source_has_no_euclidean_fallback PASSED [ 67%]
+tests/metrics/test_geodesic_error.py::test_shape_mismatch_and_bad_ranks_raise PASSED [ 67%]
+tests/metrics/test_geodesic_error.py::test_per_horizon_reductions[euclidean] PASSED [ 67%]
+tests/metrics/test_geodesic_error.py::test_per_horizon_reductions[poincare] PASSED [ 68%]
+tests/metrics/test_geodesic_error.py::test_per_horizon_reductions[poincare(c=-0.5)] PASSED [ 68%]
+tests/metrics/test_geodesic_error.py::test_per_horizon_reductions[lorentz] PASSED [ 68%]
+tests/metrics/test_geodesic_error.py::test_static_predictor_scores_exactly_one_in_every_geometry[euclidean] PASSED [ 68%]
+tests/metrics/test_geodesic_error.py::test_static_predictor_scores_exactly_one_in_every_geometry[poincare] PASSED [ 69%]
+tests/metrics/test_geodesic_error.py::test_static_predictor_scores_exactly_one_in_every_geometry[poincare(c=-0.5)] PASSED [ 69%]
+tests/metrics/test_geodesic_error.py::test_static_predictor_scores_exactly_one_in_every_geometry[lorentz] PASSED [ 69%]
+tests/metrics/test_geodesic_error.py::test_normalised_error_handles_targets_that_did_not_move PASSED [ 69%]
+tests/metrics/test_gromov_hyperbolicity.py::test_tree_metric_has_zero_delta PASSED [ 69%]
+tests/metrics/test_gromov_hyperbolicity.py::test_grid_has_positive_delta PASSED [ 70%]
+tests/metrics/test_gromov_hyperbolicity.py::test_delta_is_scale_covariant PASSED [ 70%]
+tests/metrics/test_gromov_hyperbolicity.py::test_subsampled_estimator_on_point_clouds PASSED [ 70%]
+tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[euclidean] PASSED [ 70%]
+tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-on-euclidean] PASSED [ 71%]
+tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-poincare] PASSED [ 71%]
+tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-poincare(c=-0.5)] PASSED [ 71%]
+tests/models/test_predictor_heads.py::test_output_shapes_from_random_inputs_on_cpu[hyperbolic-lorentz] PASSED [ 71%]
+tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[euclidean] PASSED [ 71%]
+tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-on-euclidean] PASSED [ 72%]
+tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-poincare] PASSED [ 72%]
+tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-poincare(c=-0.5)] PASSED [ 72%]
+tests/models/test_predictor_heads.py::test_outputs_stay_on_the_manifold_and_updates_are_bounded[hyperbolic-lorentz] PASSED [ 72%]
+tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[euclidean] PASSED [ 73%]
+tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-on-euclidean] PASSED [ 73%]
+tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-poincare] PASSED [ 73%]
+tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-poincare(c=-0.5)] PASSED [ 73%]
+tests/models/test_predictor_heads.py::test_gradients_reach_every_trainable_parameter_and_not_the_projection[hyperbolic-lorentz] PASSED [ 73%]
+tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[euclidean] PASSED [ 74%]
+tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-on-euclidean] PASSED [ 74%]
+tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-poincare] PASSED [ 74%]
+tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-poincare(c=-0.5)] PASSED [ 74%]
+tests/models/test_predictor_heads.py::test_action_conditions_the_prediction[hyperbolic-lorentz] PASSED [ 75%]
+tests/models/test_predictor_heads.py::test_heads_are_architecturally_identical PASSED [ 75%]
+tests/models/test_predictor_heads.py::test_same_seed_gives_identical_initial_weights_and_different_seeds_differ PASSED [ 75%]
+tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[euclidean] PASSED [ 75%]
+tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-on-euclidean] PASSED [ 75%]
+tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-poincare] PASSED [ 76%]
+tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-poincare(c=-0.5)] PASSED [ 76%]
+tests/models/test_predictor_heads.py::test_max_radius_retraction_bounds_every_latent[hyperbolic-lorentz] PASSED [ 76%]
+tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[euclidean] PASSED [ 76%]
+tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-on-euclidean] PASSED [ 77%]
+tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-poincare] PASSED [ 77%]
+tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-poincare(c=-0.5)] PASSED [ 77%]
+tests/models/test_predictor_heads.py::test_steps_are_measured_in_geodesic_units_in_every_geometry[hyperbolic-lorentz] PASSED [ 77%]
+tests/models/test_predictor_heads.py::test_poincare_and_lorentz_heads_are_isometric_twins PASSED [ 77%]
+tests/models/test_predictor_heads.py::test_hyperbolic_head_on_euclidean_manifold_equals_euclidean_head PASSED [ 78%]
+tests/models/test_predictor_heads.py::test_embedding_uses_expmap0_and_is_frozen PASSED [ 78%]
+tests/models/test_predictor_heads.py::test_euclidean_head_rejects_curved_manifold_and_registry_builds_both PASSED [ 78%]
+tests/models/test_vjepa2.py::test_loader_uses_torch_hub_entry_and_freezes_everything PASSED [ 78%]
+tests/models/test_vjepa2.py::test_encoder_forward_returns_patch_and_pooled_embeddings PASSED [ 79%]
+tests/models/test_vjepa2.py::test_normalize_reps_off_keeps_raw_tokens PASSED [ 79%]
+tests/models/test_vjepa2.py::test_assert_frozen_catches_a_thawed_parameter PASSED [ 79%]
+tests/models/test_vjepa2.py::test_reference_predictor_shapes_rollout_and_loss PASSED [ 79%]
+tests/models/test_vjepa2.py::test_pretrained_path_cleans_keys_and_loads_strictly PASSED [ 79%]
+tests/models/test_vjepa2.py::test_local_checkout_path_uses_hub_local_source PASSED [ 80%]
+tests/models/test_vjepa2.py::test_missing_hub_dependencies_produce_an_actionable_error PASSED [ 80%]
+tests/models/test_vjepa2.py::test_registry_builds_vjepa2_ac_bundle_with_reference_predictor PASSED [ 80%]
+tests/reporting/test_make_report.py::test_make_report_writes_every_table_and_figure PASSED [ 80%]
+tests/reporting/test_make_report.py::test_report_is_a_pure_function_of_outputs PASSED [ 81%]
+tests/reporting/test_make_report.py::test_without_a_sweep_there_are_no_curvature_figures PASSED [ 81%]
+tests/reporting/test_make_report.py::test_empty_outputs_still_produce_a_report PASSED [ 81%]
+tests/reporting/test_make_report.py::test_cli_prints_every_written_path PASSED [ 81%]
+tests/reporting/test_tables.py::test_collect_and_results_table PASSED    [ 81%]
+tests/reporting/test_tables.py::test_summary_table_aggregates_seeds PASSED [ 82%]
+tests/reporting/test_tables.py::test_sweep_table_is_a_curvature_by_dimension_grid PASSED [ 82%]
+tests/reporting/test_tables.py::test_best_curvature_table_applies_the_one_std_rule PASSED [ 82%]
+tests/reporting/test_tables.py::test_dimension_efficiency_table PASSED   [ 82%]
+tests/reporting/test_tables.py::test_metric_directions_and_bookkeeping PASSED [ 83%]
+tests/reporting/test_tables.py::test_to_markdown_formatting PASSED       [ 83%]
+tests/tasks/test_base.py::test_registry_covers_the_four_tasks_and_build_task_validates PASSED [ 83%]
+tests/tasks/test_base.py::test_result_stamps_geometry_and_curvature[euclidean] PASSED [ 83%]
+tests/tasks/test_base.py::test_result_stamps_geometry_and_curvature[poincare] PASSED [ 83%]
+tests/tasks/test_base.py::test_result_stamps_geometry_and_curvature[poincare(c=-0.5)] PASSED [ 84%]
+tests/tasks/test_base.py::test_result_stamps_geometry_and_curvature[lorentz] PASSED [ 84%]
+tests/tasks/test_base.py::test_task_is_abstract PASSED                   [ 84%]
+tests/tasks/test_base.py::test_iter_embedded_streams_manifold_points_with_metadata[euclidean] PASSED [ 84%]
+tests/tasks/test_base.py::test_iter_embedded_streams_manifold_points_with_metadata[poincare] PASSED [ 84%]
+tests/tasks/test_base.py::test_iter_embedded_streams_manifold_points_with_metadata[poincare(c=-0.5)] PASSED [ 85%]
+tests/tasks/test_base.py::test_iter_embedded_streams_manifold_points_with_metadata[lorentz] PASSED [ 85%]
+tests/tasks/test_base.py::test_iter_embedded_refuses_a_thawed_encoder PASSED [ 85%]
+tests/tasks/test_base.py::test_frechet_mean_is_the_arithmetic_mean_in_flat_space PASSED [ 85%]
+tests/tasks/test_base.py::test_frechet_mean_properties_on_curved_manifolds[euclidean] PASSED [ 86%]
+tests/tasks/test_base.py::test_frechet_mean_properties_on_curved_manifolds[poincare] PASSED [ 86%]
+tests/tasks/test_base.py::test_frechet_mean_properties_on_curved_manifolds[poincare(c=-2)] PASSED [ 86%]
+tests/tasks/test_base.py::test_frechet_mean_properties_on_curved_manifolds[lorentz] PASSED [ 86%]
+tests/tasks/test_base.py::test_frechet_mean_properties_on_curved_manifolds[lorentz(c=-0.5)] PASSED [ 86%]
+tests/tasks/test_base.py::test_frechet_mean_is_isometry_invariant_between_ball_and_hyperboloid PASSED [ 87%]
+tests/tasks/test_base.py::test_frechet_mean_validation PASSED            [ 87%]
+tests/tasks/test_base.py::test_spearman PASSED                           [ 87%]
+tests/tasks/test_compositional_generalization.py::test_normalise_holdout PASSED [ 87%]
+tests/tasks/test_compositional_generalization.py::test_split_by_combination_from_metadata PASSED [ 88%]
+tests/tasks/test_compositional_generalization.py::test_split_dataset_prefers_the_dataset_method PASSED [ 88%]
+tests/tasks/test_compositional_generalization.py::test_task_requires_a_holdout PASSED [ 88%]
+tests/tasks/test_compositional_generalization.py::test_run_reports_seen_unseen_and_gap[euclidean] PASSED [ 88%]
+tests/tasks/test_compositional_generalization.py::test_run_reports_seen_unseen_and_gap[poincare] PASSED [ 88%]
+tests/tasks/test_compositional_generalization.py::test_run_reports_seen_unseen_and_gap[poincare(c=-0.5)] PASSED [ 89%]
+tests/tasks/test_compositional_generalization.py::test_run_reports_seen_unseen_and_gap[lorentz] PASSED [ 89%]
+tests/tasks/test_compositional_generalization.py::test_run_rejects_missing_combinations PASSED [ 89%]
+tests/tasks/test_compositional_generalization.py::test_training_subset_drops_held_out_combinations PASSED [ 89%]
+tests/tasks/test_compositional_generalization.py::test_trainer_runs_the_task_on_a_head_trained_without_the_held_out_pairs PASSED [ 90%]
+tests/tasks/test_compositional_generalization.py::test_trainer_builds_tasks_before_training PASSED [ 90%]
+tests/tasks/test_hierarchy_reconstruction.py::test_score_tree_embedding_is_perfect_on_a_perfectly_embedded_chain PASSED [ 90%]
+tests/tasks/test_hierarchy_reconstruction.py::test_subtree_membership_and_node_embeddings PASSED [ 90%]
+tests/tasks/test_hierarchy_reconstruction.py::test_bootstrap_weights_resample_within_leaves PASSED [ 90%]
+tests/tasks/test_hierarchy_reconstruction.py::test_run_on_the_synthetic_hierarchy[euclidean] PASSED [ 91%]
+tests/tasks/test_hierarchy_reconstruction.py::test_run_on_the_synthetic_hierarchy[poincare] PASSED [ 91%]
+tests/tasks/test_hierarchy_reconstruction.py::test_run_on_the_synthetic_hierarchy[poincare(c=-0.5)] PASSED [ 91%]
+tests/tasks/test_hierarchy_reconstruction.py::test_run_on_the_synthetic_hierarchy[lorentz] PASSED [ 91%]
+tests/tasks/test_hierarchy_reconstruction.py::test_run_is_deterministic_and_n_seeds_zero_gives_nan_spread PASSED [ 92%]
+tests/tasks/test_hierarchy_reconstruction.py::test_pooling_happens_on_the_manifold PASSED [ 92%]
+tests/tasks/test_hierarchy_reconstruction.py::test_custom_levels PASSED  [ 92%]
+tests/tasks/test_latent_rollout.py::test_run_reports_curves_and_metrics_in_the_bundle_geometry[euclidean] PASSED [ 92%]
+tests/tasks/test_latent_rollout.py::test_run_reports_curves_and_metrics_in_the_bundle_geometry[poincare] PASSED [ 92%]
+tests/tasks/test_latent_rollout.py::test_run_reports_curves_and_metrics_in_the_bundle_geometry[poincare(c=-0.5)] PASSED [ 93%]
+tests/tasks/test_latent_rollout.py::test_run_reports_curves_and_metrics_in_the_bundle_geometry[lorentz] PASSED [ 93%]
+tests/tasks/test_latent_rollout.py::test_static_head_has_normalised_error_one_in_every_geometry[euclidean] PASSED [ 93%]
+tests/tasks/test_latent_rollout.py::test_static_head_has_normalised_error_one_in_every_geometry[poincare] PASSED [ 93%]
+tests/tasks/test_latent_rollout.py::test_static_head_has_normalised_error_one_in_every_geometry[poincare(c=-0.5)] PASSED [ 94%]
+tests/tasks/test_latent_rollout.py::test_static_head_has_normalised_error_one_in_every_geometry[lorentz] PASSED [ 94%]
+tests/tasks/test_latent_rollout.py::test_evaluate_matches_a_manual_rollout[euclidean] PASSED [ 94%]
+tests/tasks/test_latent_rollout.py::test_evaluate_matches_a_manual_rollout[poincare] PASSED [ 94%]
+tests/tasks/test_latent_rollout.py::test_evaluate_matches_a_manual_rollout[poincare(c=-0.5)] PASSED [ 94%]
+tests/tasks/test_latent_rollout.py::test_evaluate_matches_a_manual_rollout[lorentz] PASSED [ 95%]
+tests/tasks/test_latent_rollout.py::test_horizon_validation PASSED       [ 95%]
+tests/tasks/test_latent_rollout.py::test_rollout_errors_summary_prefix PASSED [ 95%]
+tests/tasks/test_long_horizon_consistency.py::test_saturation_horizon PASSED [ 95%]
+tests/tasks/test_long_horizon_consistency.py::test_branch_pairs_validation PASSED [ 96%]
+tests/tasks/test_long_horizon_consistency.py::test_run_on_in_memory_branches[euclidean] PASSED [ 96%]
+tests/tasks/test_long_horizon_consistency.py::test_run_on_in_memory_branches[poincare] PASSED [ 96%]
+tests/tasks/test_long_horizon_consistency.py::test_run_on_in_memory_branches[poincare(c=-0.5)] PASSED [ 96%]
+tests/tasks/test_long_horizon_consistency.py::test_run_on_in_memory_branches[lorentz] PASSED [ 96%]
+tests/tasks/test_long_horizon_consistency.py::test_static_head_has_zero_latent_divergence_and_undefined_correlation PASSED [ 97%]
+tests/tasks/test_long_horizon_consistency.py::test_rollouts_and_divergences_match_a_manual_computation PASSED [ 97%]
+tests/tasks/test_long_horizon_consistency.py::test_horizon_is_capped_by_the_shortest_branch PASSED [ 97%]
+tests/tasks/test_long_horizon_consistency.py::test_pairs_must_share_their_start_frame PASSED [ 97%]
+tests/tasks/test_long_horizon_consistency.py::test_constructor_validation PASSED [ 98%]
+tests/tasks/test_long_horizon_consistency.py::test_run_on_the_cosmos_dataset_layout PASSED [ 98%]
+tests/tasks/test_long_horizon_consistency.py::test_synthetic_branches_share_a_start_frame_and_drive_the_task PASSED [ 98%]
 tests/test_smoke_experiment.py::test_smoke_config_is_tiny_and_cpu PASSED [ 98%]
 tests/test_smoke_experiment.py::test_smoke_runs_end_to_end[poincare] PASSED [ 98%]
 tests/test_smoke_experiment.py::test_smoke_runs_end_to_end[lorentz] PASSED [ 99%]
 tests/test_smoke_experiment.py::test_smoke_runs_end_to_end[euclidean] PASSED [ 99%]
 tests/test_smoke_experiment.py::test_encoder_stays_frozen PASSED         [ 99%]
-tests/test_smoke_experiment.py::test_hyperbolic_head_on_euclidean_manifold_matches_euclidean_head PASSED [100%]
+tests/test_smoke_experiment.py::test_hyperbolic_head_on_euclidean_manifold_matches_euclidean_head PASSED [ 99%]
+tests/test_smoke_experiment.py::test_smoke_runs_all_four_tasks_on_branched_synthetic_data PASSED [100%]
 
 =========================== short test summary info ============================
 SKIPPED [1] tests/data/test_cosmos3.py:284: needs ffmpeg
-======================== 348 passed, 1 skipped in 6.45s ========================
+======================= 452 passed, 1 skipped in 19.16s ========================
 ```
 
 What the tests cover:
@@ -699,11 +812,19 @@ What the tests cover:
 - [x] Predictor heads (`tests/models/test_predictor_heads.py`), over the Euclidean head and the hyperbolic head on Euclidean, Poincaré (c ∈ {-1, -0.5}) and Lorentz manifolds: output shapes of `embed`, `step`, `rollout`, `forward`, `fuse`, `delta` and `coordinates` from random CPU inputs; outputs stay on the manifold with `max_step` and `max_radius` respected even under forced maximal updates; gradients reach every trainable parameter and never the frozen projection; the action conditions the prediction; both heads have identical parameter signatures and identical initial weights for the same seed; steps are measured in geodesic units in every geometry; Poincaré and Lorentz heads with identical weights are isometric twins; `HyperbolicHead(Euclidean)` equals `EuclideanHead` exactly; the embedding is `expmap0` of the frozen orthonormal projection; the registry builds both heads and rejects mismatched geometry.
 - [x] V-JEPA 2-AC loader (`tests/models/test_vjepa2.py`, with tiny stand-ins for the hub modules, no download): `torch.hub.load` is called with the `vjepa2_ac_vit_giant` entry, pinned ref and `pretrained=False`; encoder and Meta's reference predictor come back frozen and cannot be switched to training mode; `assert_frozen` catches a thawed parameter in either; `forward` returns patch `(B, T, N, D)` and pooled `(B, T, D)` embeddings, encodes each frame as a 2-frame tubelet and layer-normalises tokens (and does not when `normalize_reps` is off); the reference predictor's frame-causal forward, `predict_next`, autoregressive `rollout` and L1 loss have the expected shapes and reject misaligned inputs; the pretrained path cleans `module.`/`backbone.` prefixes, loads strictly and refuses a checkpoint with missing keys; a local checkout path is loaded with hub's `source="local"`; a missing `timm` produces an actionable error; the registry builds the bundle with the reference predictor attached.
 - [x] Cosmos 3 pipeline (`tests/data/test_cosmos3.py`, all with fakes, no model): action-spec parsing and validation (shapes, missing frames, duplicate ids, unsupported formats, prompt text with task fallback); deterministic distinct per-branch seeds; end-to-end generation writes `frames.npz`, `meta.json` and `manifest.jsonl` with shared start frames across branches, is idempotent and reproducible, and takes the batched path when the generator offers one; the CLI's `--dry-run` plan and injected-generator path; `Cosmos3Generator` builds `forward_dynamics` samples with the expected fields (domain, chunk size, image size, fps, view point, prompt, seed, sampler settings), invokes the framework once per chunk level with every active rollout batched, zero-pads the last chunk, seeds each chunk as branch seed plus level, conditions each later chunk on the previous chunk's last frame, tolerates extra output frames and stitches without duplicated or dropped frames; chunk sizes must be multiples of 4; a missing framework or short output gives an actionable error; the ffmpeg helpers fail cleanly without ffmpeg (the lossy round trip runs only where ffmpeg exists, skipped here); latent pooling (mean, flatten), extraction to float16 npz with manifest update, idempotence and the CLI; `Cosmos3TokenizerBackend` pads T to 4n+1, crops to multiples of 16 and feeds a `[-1, 1]` bfloat16 `(1, 3, T, H, W)` tensor; the dataset's windows, shapes, resize, metadata, branch groups and pairs sharing a start frame, compositional split with its safety checks, hierarchy construction, latents access, deterministic splits and config construction.
+- [x] Geodesic error (`tests/metrics/test_geodesic_error.py`), over Euclidean, Poincaré (c ∈ {-1, -0.5}) and Lorentz: the error equals `manifold.dist` and differs from the coordinate norm on curved geometries; anything that is not a `Manifold` (`None`, a string, a geoopt manifold, a function) raises `TypeError`; the module's AST calls no `cdist`/`norm`/`vector_norm`/`mse_loss` and only `manifold.dist`; shape and reduction validation; mean/median/unreduced per-horizon reductions; the static baseline accepts `(..., d)` and `(..., 1, d)` contexts and the normalised error (per sample and per horizon) is exactly 1 for a static predictor and 0 for a perfect one; targets that did not move give finite values.
+- [x] Dimension efficiency (`tests/metrics/test_dimension_efficiency.py`): sorted long tables with a helpful `KeyError`; `DimensionCurve` validation (lengths, order, uniqueness, positivity); seed averaging in `curves_from_table`; log₂ AUC on known curves (2 for a flat curve over 2, 4, 8); dimension-to-reach in both directions; the efficiency table shows the uniformly better curve reaching the threshold earlier with a smaller AUC and `NaN` for single-dimension curves.
 - [x] Gromov δ (`tests/metrics`): exactly 0 on the embodiment > task > primitive tree metric from any base point; positive on L1 and L2 grids; scale covariant; subsampled estimator on point clouds, including a path (δ = 0).
 - [x] Distortion and mAP: 0 and 1.0 on a perfectly embedded path graph; scale fitting matters; shape validation; structured beats random on a Poincaré tree embedding.
-- [x] Smoke experiment: `configs/experiments/smoke.yaml` runs end to end on CPU in Poincaré, Lorentz and Euclidean geometry; loss decreases; error grows with horizon; `metrics.json`, curves CSV and resolved config are written with the geometry recorded; the encoder cannot be un-frozen; `HyperbolicHead` on the flat manifold equals `EuclideanHead` exactly.
+- [x] Task base (`tests/tasks/test_base.py`): the registry holds exactly the four tasks and `build_task` validates names and kwargs; results are stamped with the bundle's geometry and curvature and serialise; `iter_embedded` yields on-manifold `(B, T, d)` latents with encoder latents, actions, frames, metadata and indices, honours index subsets in order, leaves the head in eval mode and refuses a thawed encoder; the Fréchet mean is the (weighted) arithmetic mean in flat space, and on Poincaré (c ∈ {-1, -2}) and Lorentz (c ∈ {-1, -0.5}) it is stationary (mean log map < 1e-5), beats the naive tangent-space mean and any input point on the squared-distance objective, returns single or repeated points unchanged, maps symmetric points to the origin, corresponds between ball and hyperboloid under the isometry, and validates its inputs; Spearman handles ties, constants (NaN) and length mismatches.
+- [x] Latent rollout (`tests/tasks/test_latent_rollout.py`), over all four geometries: metrics and curves in the bundle's geometry with the scalars equal to the curve endpoints; a zero-initialised head has error identical to the static baseline and normalised error exactly 1; `evaluate` on an index subset matches a manual encode → embed → rollout → `geodesic_error` computation; horizon validation and empty subsets raise; prefixed summaries.
+- [x] Hierarchy reconstruction (`tests/tasks/test_hierarchy_reconstruction.py`): a perfectly embedded chain scores 0 distortion, 1.0 mAP and Spearman ±1 depending on orientation; subtree membership and Fréchet node embeddings (root = mean of everything, uniform weights = unweighted, empty node raises); bootstrap weights resample within leaves, deterministically per seed; on the synthetic hierarchy in every geometry the task reports 27 nodes, 16 leaves, ranged metrics, `*_std` and the per-depth `dist0` curve; batch size does not change the result; `n_seeds=0` gives NaN spreads; per-trajectory pooling is the Fréchet mean, not a coordinate average; custom levels.
+- [x] Long-horizon consistency (`tests/tasks/test_long_horizon_consistency.py`): saturation horizon; `branch_pairs` validation (no method, no pairs); on in-memory branching data in every geometry all four divergence curves are positive with the scalars equal to the curve endpoints and correlations in [-1, 1]; a static head has zero latent divergence and undefined correlation; every curve matches a manual computation for one pair; the horizon is capped by the shortest branch; mismatched start frames raise; constructor validation; the real `Cosmos3TrajectoryDataset` layout (hand-written manifest) drives the task; synthetic `n_branches` prompts share their start frame and drive the task.
+- [x] Compositional generalisation (`tests/tasks/test_compositional_generalization.py`): holdout normalisation; metadata split with the missing-pair and removed-embodiment checks; the dataset's own `split_by_combination` is preferred (fake and real Cosmos 3 loader); an empty holdout is refused; in every geometry seen/unseen summaries, gaps, ratio, counts and curves are reported and each subset equals the latent-rollout task restricted to it; `training_subset` drops the held-out episodes; the trainer runs the task end to end on 48 of 64 episodes with the seed recorded, and builds the tasks before training so a bad task config fails before the first epoch.
+- [x] Reporting (`tests/reporting`): run collection and the sorted long table; summary mean/std/count over seeds; the curvature × dimension sweep grid; best-curvature-vs-Euclidean picks the minimum or maximum by metric direction, applies the one-std rule, never flags single-seed runs and is NaN without a baseline; dimension efficiency with the Euclidean-at-max-dimension threshold; metric direction and bookkeeping filters; Markdown formatting of NaN, integers and booleans; `make_report` writes every expected table and figure and an index, gives no sweep table or figure to counts or `*_std`, is byte-identical on a second run, removes stale generated files and nothing else, produces only dimension figures without a sweep, still writes a report for an empty `outputs/`, and the CLI prints every path.
+- [x] Smoke experiment: `configs/experiments/smoke.yaml` runs end to end on CPU in Poincaré, Lorentz and Euclidean geometry; loss decreases; error grows with horizon; `metrics.json`, curves CSV and resolved config are written with the geometry recorded; with `tasks=all`, `data.n_branches=2` and a held-out pair all four tasks run and write their curves; the encoder cannot be un-frozen; `HyperbolicHead` on the flat manifold equals `EuclideanHead` exactly.
 
-CI runs `ruff check`, `ruff format --check`, `pytest tests/geometry tests/metrics` and `scripts/run_smoke.sh`, all on CPU.
+CI runs `ruff check`, `ruff format --check`, `pytest tests/geometry tests/metrics tests/tasks tests/reporting` and `scripts/run_smoke.sh`, all on CPU.
 
 ---
 

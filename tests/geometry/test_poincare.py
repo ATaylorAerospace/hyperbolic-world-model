@@ -7,10 +7,10 @@ import math
 import geoopt
 import pytest
 import torch
-from tests.geometry.helpers import random_points, random_tangents
 
 from hyperbolic_world_model.geometry import PoincareBall, build_manifold
 from hyperbolic_world_model.geometry.utils import BOUNDARY_EPS
+from tests.geometry.helpers import random_points, random_tangents
 
 CURVATURES = [-0.5, -1.0, -2.0]
 

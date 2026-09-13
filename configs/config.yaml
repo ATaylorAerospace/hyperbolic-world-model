@@ -12,7 +12,7 @@ defaults:
 experiment_name: ${hydra:job.name}
 seed: 0
 device: cpu
-output_dir: outputs/${experiment_name}/geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim}
+output_dir: outputs/${experiment_name}/geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim},seed=${seed}
 
 training:
   epochs: 10
@@ -27,6 +27,6 @@ hydra:
     dir: ${output_dir}/hydra
   sweep:
     dir: outputs/${experiment_name}
-    subdir: geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim}/hydra
+    subdir: geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim},seed=${seed}/hydra
   job:
     chdir: false
