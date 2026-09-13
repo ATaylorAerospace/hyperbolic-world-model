@@ -1,9 +1,9 @@
 """Frozen DINOv2 image encoder for the DINO-WM secondary subject.
 
 DINO-WM (Zhou et al., 2024) encodes each frame independently with DINOv2 and trains a ViT
-predictor on the patch tokens. Here the encoder is frozen and its CLS embedding (or mean patch
-embedding) per frame is exposed through the :class:`FrozenEncoder` contract so the same predictor
-heads and metrics apply unchanged.
+predictor on the patch tokens. Here the encoder is frozen and exposed through the
+:class:`FrozenEncoder` contract: patch tokens per frame plus a pooled embedding (CLS or mean),
+so the same predictor heads and metrics apply unchanged.
 
 Weights: https://huggingface.co/facebook/dinov2-base (Apache 2.0). Nothing is downloaded at import.
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 import torch
 from torch import Tensor
 
-from hyperbolic_world_model.models.encoders import FrozenEncoder
+from hyperbolic_world_model.models.encoders import EncoderOutput, FrozenEncoder
 
 DEFAULT_MODEL_ID = "facebook/dinov2-base"
 
@@ -47,8 +47,8 @@ class DINOv2Encoder(FrozenEncoder):
         self.register_buffer("image_std", torch.tensor(image_std).view(1, 3, 1, 1))
         self.freeze()
 
-    def forward(self, frames: Tensor) -> Tensor:
-        """Encode ``(B, T, 3, H, W)`` frames in ``[0, 1]`` to ``(B, T, embed_dim)``.
+    def forward(self, frames: Tensor) -> EncoderOutput:
+        """Encode ``(B, T, 3, H, W)`` frames in ``[0, 1]``.
 
         TODO(phase 2): confirm the DINOv2 ``patch_size``-divisible resize policy used by DINO-WM
         (224x224 centre crop) and apply it here rather than assuming pre-resized inputs.
@@ -58,12 +58,13 @@ class DINOv2Encoder(FrozenEncoder):
         b, t = frames.shape[:2]
         images = frames.reshape(b * t, *frames.shape[2:])
         images = (images - self.image_mean) / self.image_std
-        out = self.model(pixel_values=images)
-        if self.pooling == "cls":
-            feats = out.last_hidden_state[:, 0]
-        else:
-            feats = out.last_hidden_state[:, 1:].mean(dim=1)
-        return feats.reshape(b, t, self.embed_dim)
+        hidden = self.model(pixel_values=images).last_hidden_state  # (B*T, 1 + N, D)
+        patch = hidden[:, 1:]
+        pooled = hidden[:, 0] if self.pooling == "cls" else patch.mean(dim=1)
+        return EncoderOutput(
+            patch=patch.reshape(b, t, patch.shape[1], self.embed_dim),
+            pooled=pooled.reshape(b, t, self.embed_dim),
+        )
 
 
 def load_dinov2_encoder(

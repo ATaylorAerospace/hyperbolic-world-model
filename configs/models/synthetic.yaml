@@ -10,6 +10,8 @@ head:
   latent_dim: 8
   hidden_dim: 64
   n_layers: 2
+  action_embed_dim: 16
   embed_scale: 1.0
   max_step: 5.0
+  max_radius: 8.0
   seed: 0

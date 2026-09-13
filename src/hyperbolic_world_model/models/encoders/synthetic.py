@@ -4,7 +4,7 @@ It is a fixed, seeded random linear projection of the flattened frame. It has no
 parameters, downloads nothing and runs in milliseconds, which is exactly what CI needs to
 exercise the end-to-end path (encode -> project onto manifold -> predict -> score in native
 geometry) without a real checkpoint. It is registered as ``models=synthetic`` and must never be
-used for reported results.
+used for reported results. Its "patch" output is a single token per frame.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from hyperbolic_world_model.models.encoders import FrozenEncoder
+from hyperbolic_world_model.models.encoders import EncoderOutput, FrozenEncoder
 
 
 class SyntheticEncoder(FrozenEncoder):
@@ -34,12 +34,13 @@ class SyntheticEncoder(FrozenEncoder):
         self.register_buffer("weight", weight)
         self.freeze()
 
-    def forward(self, frames: Tensor) -> Tensor:
+    def forward(self, frames: Tensor) -> EncoderOutput:
         if frames.ndim != 5:
             raise ValueError(f"expected (B, T, C, H, W), got {tuple(frames.shape)}")
         b, t = frames.shape[:2]
         flat = frames.reshape(b, t, -1).to(self.weight.dtype)
-        return flat @ self.weight
+        pooled = flat @ self.weight
+        return EncoderOutput(patch=pooled.unsqueeze(2), pooled=pooled)
 
 
 __all__ = ["SyntheticEncoder"]

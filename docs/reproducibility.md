@@ -3,8 +3,8 @@
 ## One-command paths
 
 ```bash
-# Environment (exact versions from uv.lock)
-uv sync
+# Environment (exact versions from uv.lock); the vjepa2 extra adds timm for torch.hub
+uv sync --extra vjepa2
 
 # Unit tests + smoke experiment (CPU, no downloads, < 1 minute)
 uv run pytest -v
