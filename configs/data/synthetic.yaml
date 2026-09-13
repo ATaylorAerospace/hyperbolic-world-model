@@ -1,0 +1,9 @@
+# In-memory synthetic trajectories for the smoke experiment.
+name: synthetic
+n_episodes: 64
+horizon: 8
+state_dim: 8
+action_dim: 4
+frame_shape: [1, 8, 8]
+noise_std: 0.01
+seed: 0

@@ -1,0 +1,27 @@
+# @package _global_
+# Poincaré head with curvature and latent dimension swept. Run with --multirun.
+# Curvature is never fixed: the reported number is the best (and full curve) over this grid.
+defaults:
+  - override /geometry: poincare
+  - override /models: vjepa2_ac
+  - override /data: droid
+  - override /tasks: all
+  - override /hydra/sweeper: basic
+
+experiment_name: poincare_sweep
+
+training:
+  epochs: 30
+  batch_size: 64
+  lr: 1.0e-3
+  weight_decay: 0.01
+  grad_clip: 1.0
+  save_head: true
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      geometry.curvature: -0.1,-0.25,-0.5,-1.0,-2.0,-4.0
+      models.head.latent_dim: 8,16,32,64,128
+      seed: 0,1,2

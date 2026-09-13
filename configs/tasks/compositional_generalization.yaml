@@ -1,0 +1,5 @@
+# Rollout error gap between seen and held-out (embodiment, primitive) combinations.
+- name: compositional_generalization
+  horizon: 8
+  batch_size: 32
+  holdout: ${data.holdout_combinations}

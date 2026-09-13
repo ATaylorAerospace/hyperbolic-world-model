@@ -1,0 +1,4 @@
+# Lorentz / hyperboloid model. Isometric to the Poincaré ball of the same curvature but
+# numerically better behaved far from the origin. Curvature K < 0 is swept.
+name: lorentz
+curvature: -1.0

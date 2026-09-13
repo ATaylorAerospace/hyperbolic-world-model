@@ -1,0 +1,32 @@
+# Root Hydra config. Experiments (configs/experiments/*.yaml) override the groups below.
+# Run with:  python -m hyperbolic_world_model.training.train_predictor experiments=<name>
+# `_self_` comes first so that experiment files override every value below.
+defaults:
+  - _self_
+  - geometry: euclidean
+  - models: vjepa2_ac
+  - data: droid
+  - tasks: latent_rollout
+  - experiments: null
+
+experiment_name: ${hydra:job.name}
+seed: 0
+device: cpu
+output_dir: outputs/${experiment_name}/geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim}
+
+training:
+  epochs: 10
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 0.0
+  grad_clip: 1.0
+  save_head: true
+
+hydra:
+  run:
+    dir: ${output_dir}/hydra
+  sweep:
+    dir: outputs/${experiment_name}
+    subdir: geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim}/hydra
+  job:
+    chdir: false

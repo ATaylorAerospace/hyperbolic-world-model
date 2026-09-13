@@ -1,0 +1,4 @@
+# Average distortion and mAP of latents against the embodiment > task > primitive tree.
+- name: hierarchy_reconstruction
+  batch_size: 32
+  n_seeds: 3

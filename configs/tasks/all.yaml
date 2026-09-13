@@ -1,0 +1,14 @@
+# Every task. Used by the full baseline and sweep experiments.
+- name: latent_rollout
+  horizon: 8
+  batch_size: 32
+- name: hierarchy_reconstruction
+  batch_size: 32
+  n_seeds: 3
+- name: long_horizon_consistency
+  horizon: 32
+  batch_size: 16
+- name: compositional_generalization
+  horizon: 8
+  batch_size: 32
+  holdout: ${data.holdout_combinations}

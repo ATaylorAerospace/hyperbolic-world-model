@@ -1,0 +1,3 @@
+# Flat baseline. Curvature is identically 0 and is not swept.
+name: euclidean
+curvature: 0.0
