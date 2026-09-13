@@ -1,12 +1,12 @@
 """Flat Euclidean space: the baseline geometry.
 
-Every primitive is the identity or a subtraction. Included so the Euclidean predictor head and the
-Euclidean metrics go through exactly the same ``Manifold`` interface as the hyperbolic ones; no
-code path outside ``geometry/`` should special-case "flat".
+Wraps ``geoopt.Euclidean(ndim=1)`` so the baseline goes through exactly the same ``Manifold``
+interface as the curved geometries; no code path outside ``geometry/`` special-cases "flat".
 """
 
 from __future__ import annotations
 
+import geoopt
 import torch
 from torch import Tensor
 
@@ -14,41 +14,42 @@ from hyperbolic_world_model.geometry.base import Manifold
 
 
 class Euclidean(Manifold):
-    """R^n with the standard metric. ``curvature`` is fixed at ``0``."""
+    """R^n with the standard metric. ``c`` must be ``0``."""
 
     name = "euclidean"
 
-    def __init__(self, curvature: float = 0.0) -> None:
-        if curvature != 0.0:
-            raise ValueError(f"Euclidean space has curvature 0, got {curvature}")
-        super().__init__(curvature=0.0)
+    def __init__(self, c: float = 0.0) -> None:
+        if c != 0.0:
+            raise ValueError(f"Euclidean space has curvature 0, got c={c}")
+        super().__init__(c=0.0)
+        self._g = geoopt.Euclidean(ndim=1)
 
     def expmap(self, x: Tensor, u: Tensor) -> Tensor:
-        return x + u
+        return self._g.expmap(x, u)
 
     def logmap(self, x: Tensor, y: Tensor) -> Tensor:
-        return y - x
+        return self._g.logmap(x, y)
 
     def dist(self, x: Tensor, y: Tensor) -> Tensor:
-        return (y - x).norm(dim=-1)
+        return self._g.dist(x, y)
 
     def sqdist(self, x: Tensor, y: Tensor) -> Tensor:
-        return ((y - x) ** 2).sum(dim=-1)
+        return self._g.dist2(x, y)
 
     def proj(self, x: Tensor) -> Tensor:
-        return x
+        return self._g.projx(x)
 
     def ptransp(self, x: Tensor, y: Tensor, u: Tensor) -> Tensor:
-        return u
+        return self._g.transp(x, y, u)
 
     def proj_tan(self, x: Tensor, u: Tensor) -> Tensor:
-        return u
+        return self._g.proju(x, u)
 
     def origin(self, *shape: int, dtype: torch.dtype = torch.float32, device=None) -> Tensor:
         return torch.zeros(*shape, dtype=dtype, device=device)
 
     def egrad2rgrad(self, x: Tensor, grad: Tensor) -> Tensor:
-        return grad
+        return self._g.egrad2rgrad(x, grad)
 
     def expmap0(self, u: Tensor) -> Tensor:
         return u
@@ -56,10 +57,8 @@ class Euclidean(Manifold):
     def logmap0(self, y: Tensor) -> Tensor:
         return y
 
-    def to_geoopt(self):
-        import geoopt
-
-        return geoopt.Euclidean(ndim=1)
+    def to_geoopt(self) -> geoopt.Euclidean:
+        return self._g
 
 
 __all__ = ["Euclidean"]

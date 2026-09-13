@@ -127,10 +127,24 @@ axis). The headline claim, if the hypothesis holds, is "hyperbolic reaches error
 
 ## Numerical caveats (measured, see `tests/geometry`)
 
-- Poincaré ball in float32 cannot represent geodesic distances beyond ~6.2 (unit curvature)
-  because the `artanh` argument is clamped at `1 - 4e-3`. Latents must stay well inside this;
-  `HyperbolicHead.max_step` and `embed_scale` enforce it, and a Lorentz run is the cross-check.
-- Lorentz in float32 has self-distance noise growing like `1e-3 · x_0`; beyond ~6 units from the
-  origin use float64 for the geometry.
-- Both models agree with each other under the isometry to 1e-9 in float64
-  (`test_lorentz.py::test_isometric_to_poincare_ball`), which is the cross-geometry consistency check.
+The curved geometries delegate to geoopt (`geoopt.PoincareBall`, `geoopt.Lorentz`); we keep our
+own code only for the Lorentz parallel transport (geoopt's divides by the squared distance and is
+singular when the two points coincide) and the ball-to-hyperboloid isometries (geoopt's assume the
+unit ball, which is wrong for any curvature other than -1). The geoopt curvature parameter is held
+in float64 so float64 inputs get float64 accuracy at every curvature.
+
+- Poincaré ball, float32, points at 0.999 of the radius: quantities that do not go through Möbius
+  addition (`dist0`, `logmap0`, `lambda_x`) agree with float64 to 1e-4; pairwise `dist` and
+  `logmap` between two boundary points lose about 1%; `expmap` projects back to
+  `(1 - 4e-3) * radius`, so the float32 exp/log round trip only holds inside that radius
+  (`test_poincare.py::test_float32_round_trip_holds_inside_the_clip_margin`). Float64 round-trips
+  to 1e-5 even at 0.999 of the radius.
+- Lorentz, float32, at the image of 0.999 of the radius (`x_0 ~ 1e3`): `dist0` and pairwise `dist`
+  agree with float64 to 1e-5, self-distance noise is bounded by `2e-3 * x_0`, and `logmap` can
+  lose up to 20%. Even in float64 the hyperboloid exp/log round trip degrades exponentially with
+  distance (below 1e-5 at 4 units from the origin, below 1 at the 0.999-radius image), so
+  hyperboloid latents must stay within a few units of the origin; `HyperbolicHead.max_step` and
+  `embed_scale` enforce this.
+- The two models agree with each other under the isometry to 1e-9 in float64 at every swept
+  curvature (`test_lorentz.py::test_isometry_to_poincare_ball`), which is the cross-geometry
+  consistency check.

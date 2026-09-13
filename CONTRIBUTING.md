@@ -11,7 +11,7 @@ git clone https://github.com/ATaylorAerospace/hyperbolic-world-model
 cd hyperbolic-world-model
 uv sync                       # creates .venv with the locked dependencies
 cp .env.example .env          # fill in HF_TOKEN if you need gated weights
-uv run pytest                 # 79 tests, CPU, < 10 s
+uv run pytest                 # 271 tests, CPU, < 30 s
 uv run ruff check . && uv run ruff format --check .
 ```
 
@@ -21,8 +21,10 @@ uv run ruff check . && uv run ruff format --check .
    `hyperbolic_world_model.geometry.Manifold` and call `expmap`, `logmap`, `dist`, `proj`,
    `ptransp`. They never import `PoincareBall`, `Lorentz` or `Euclidean` by name. To add a
    geometry: one file in `src/hyperbolic_world_model/geometry/`, one registry entry in
-   `geometry/__init__.py`, one config in `configs/geometry/`, one test file in `tests/geometry/`
-   that covers the same contract as `test_poincare.py`.
+   `geometry/__init__.py`, one config in `configs/geometry/`, and one entry in `MANIFOLD_CASES`
+   in `tests/geometry/test_base.py`, which runs the whole contract against it. Every public
+   function must be referenced by a test: `tests/geometry/test_public_api.py` fails otherwise.
+   Prefer delegating to geoopt; write your own math only where geoopt lacks it or is singular.
 2. **Encoders stay frozen.** No PR may add a code path that sets `requires_grad=True` on an
    encoder parameter or saves encoder weights. `FrozenEncoder.assert_frozen` is called before the
    first optimiser step and before every checkpoint write; keep it that way.
