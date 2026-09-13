@@ -1,0 +1,91 @@
+[project]
+name = "hyperbolic-world-model"
+version = "0.1.0"
+description = "Evaluating hyperbolic latent spaces in action-conditioned world models (V-JEPA 2-AC, DINO-WM, Cosmos 3 probes)."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "A Taylor" }]
+requires-python = ">=3.11"
+keywords = ["hyperbolic", "world-model", "v-jepa", "cosmos", "riemannian", "geoopt"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.26",
+    "einops>=0.7",
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+    "geoopt>=0.5",
+    "huggingface_hub>=0.23",
+    "transformers>=4.53",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Repository = "https://github.com/ATaylorAerospace/hyperbolic-world-model"
+
+[project.scripts]
+hwm-train = "hyperbolic_world_model.training.train_predictor:main"
+hwm-report = "hyperbolic_world_model.reporting.make_report:main"
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hyperbolic_world_model"]
+
+[tool.uv]
+# Dev tools are installed by default with `uv sync`.
+default-groups = ["dev"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["data", "checkpoints", "outputs", "multirun"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "NPY", "RUF"]
+ignore = [
+    "E501",   # line length handled by the formatter
+    "RUF012", # mutable class attributes are fine for nn.Module registries
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hyperbolic_world_model"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
+markers = [
+    "smoke: end-to-end CPU smoke experiment (slow-ish, run in CI once)",
+]
+filterwarnings = [
+    "ignore:.*torch.jit.script.*:FutureWarning",
+]

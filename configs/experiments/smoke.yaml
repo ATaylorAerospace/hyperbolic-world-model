@@ -1,0 +1,21 @@
+# @package _global_
+# Tiny end-to-end run on CPU: synthetic data, synthetic frozen encoder, Poincaré head,
+# latent rollout task. Used by CI and tests/test_smoke_experiment.py. Takes seconds.
+defaults:
+  - override /geometry: poincare
+  - override /models: synthetic
+  - override /data: synthetic
+  - override /tasks: latent_rollout
+
+experiment_name: smoke
+seed: 0
+device: cpu
+output_dir: outputs/smoke/geometry=${geometry.name},K=${geometry.curvature},dim=${models.head.latent_dim}
+
+training:
+  epochs: 20
+  batch_size: 16
+  lr: 3.0e-3
+  weight_decay: 0.0
+  grad_clip: 1.0
+  save_head: false

@@ -1,0 +1,8 @@
+# DROID real-robot episodes. Not downloaded by this repository; see data/README.md.
+name: droid
+root: ${oc.env:DATA_ROOT,data}/droid
+horizon: 8                           # predicted steps per training window
+stride: 4                            # window stride in frames
+image_size: 256
+action_dim: 7
+holdout_combinations: []             # (embodiment, primitive) pairs held out for compositional generalisation

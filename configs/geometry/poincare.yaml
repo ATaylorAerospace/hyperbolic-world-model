@@ -1,0 +1,5 @@
+# Poincaré ball. `curvature` is the sectional curvature K < 0 (ball radius 1/sqrt(-K)).
+# It is a swept hyperparameter: see configs/experiments/poincare_sweep.yaml. -1.0 is only the
+# default for single runs, never the reported value.
+name: poincare
+curvature: -1.0

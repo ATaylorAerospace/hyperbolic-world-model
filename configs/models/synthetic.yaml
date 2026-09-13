@@ -1,0 +1,15 @@
+# CPU fixture: frozen random projection encoder. For CI and tests only; never for reported results.
+name: synthetic
+embed_dim: 16
+encoder:
+  frozen: true
+  frame_shape: [1, 8, 8]
+  seed: 0
+head:
+  type: hyperbolic
+  latent_dim: 8
+  hidden_dim: 64
+  n_layers: 2
+  embed_scale: 1.0
+  max_step: 5.0
+  seed: 0

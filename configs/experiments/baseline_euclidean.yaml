@@ -1,0 +1,21 @@
+# @package _global_
+# Euclidean baseline: V-JEPA 2 (frozen) + Euclidean head on DROID, all tasks.
+defaults:
+  - override /geometry: euclidean
+  - override /models: vjepa2_ac
+  - override /data: droid
+  - override /tasks: all
+
+experiment_name: baseline_euclidean
+models:
+  head:
+    type: euclidean
+    latent_dim: 64
+
+training:
+  epochs: 30
+  batch_size: 64
+  lr: 1.0e-3
+  weight_decay: 0.01
+  grad_clip: 1.0
+  save_head: true
