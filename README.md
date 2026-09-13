@@ -10,7 +10,7 @@
 [![Tests](https://img.shields.io/badge/tests-452%20passing-brightgreen)](#-verification)
 [![Curvature: Swept](https://img.shields.io/badge/Curvature-Swept-orange)](docs/methodology.md)
 
-**A research harness that retrains the action-conditioned predictor head of a frozen video world model (V-JEPA 2-AC, with DINO-WM as a lightweight second subject) in Euclidean, Poincaré and Lorentz latent spaces, and measures whether negative curvature buys better rollouts, hierarchy recovery and dimension efficiency, with every distance computed in the geometry of the model that produced it and curvature always swept.**
+**A research harness that retrains the action conditioned predictor head of a frozen video world model (V-JEPA 2-AC, with DINO-WM as a lightweight second subject) in Euclidean, Poincaré and Lorentz latent spaces, and measures whether negative curvature buys better rollouts, hierarchy recovery and dimension efficiency, with every distance computed in the geometry of the model that produced it and curvature always swept.**
 
 **Author: A Taylor**
 
