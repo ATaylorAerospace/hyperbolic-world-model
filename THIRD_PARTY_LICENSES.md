@@ -1,6 +1,7 @@
 # Third-party licences
 
-This repository is licensed under Apache 2.0 (see [LICENSE](LICENSE)). It depends on, or is
+This repository is licensed under PolyForm Noncommercial 1.0.0 (see [LICENSE](LICENSE)); every
+dependency below is permissively licensed and imposes no copyleft on this code. It depends on, or is
 designed to load, the following third-party software and weights. **No model weights are
 redistributed in this repository**; every checkpoint is downloaded by the user from its upstream
 source under the upstream terms.
@@ -28,5 +29,5 @@ source under the upstream terms.
 | NVIDIA Cosmos 3 Nano (`nvidia/Cosmos3-Nano`) | Inference only: forward-dynamics trajectory generation and vision-VAE latents for hyperbolicity probing. Never fine-tuned, never modified. | OpenMDW 1.1 (accept on the Hub) | No |
 
 If you redistribute a trained predictor head from this repository, it contains none of the
-upstream weights (only the head's own parameters) and is covered by this repository's Apache 2.0
-licence. Encoder weights are never written to `checkpoints/predictors/`.
+upstream weights (only the head's own parameters) and is covered by this repository's licence
+(PolyForm Noncommercial 1.0.0). Encoder weights are never written to `checkpoints/predictors/`.
