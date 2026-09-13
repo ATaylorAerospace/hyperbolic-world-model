@@ -1,46 +1,229 @@
-"""Loader for Cosmos 3 generated trajectories (``data/cosmos3/manifest.jsonl``).
+"""Loader for Cosmos-generated trajectories (``manifest.jsonl``), in the shared batch format.
 
-Yields the shared batch format. Because every rollout shares its start frame with its siblings
-(branching futures), the loader exposes :meth:`Cosmos3TrajectoryDataset.branches` grouping
-trajectories by prompt id, which the long-horizon consistency task uses.
+Each item is one window of ``horizon + 1`` frames and ``horizon`` actions from one rollout::
 
-TODO(phase 2): implement video decoding (``.mp4`` -> uint8 frames -> float ``[0, 1]``) and the
-manifest index. Depends on :mod:`generate` having produced data.
+    {"frames": float (T, 3, H, W) in [0, 1], "actions": float (T - 1, a), "meta": {...}}
+
+with ``meta`` carrying ``prompt_id``, ``branch_id``, ``embodiment``, ``task``, ``primitive``, the
+window offset and, when extracted, ``latents_path``. Frames are resized to ``image_size`` with
+bilinear interpolation (torch only).
+
+What the two tasks need is exposed directly:
+
+* :meth:`Cosmos3TrajectoryDataset.branches` groups item indices by ``prompt_id``. Every branch of a
+  prompt shares its start frame, so the long-horizon consistency task can pair windows at offset 0
+  across branches and measure how latent divergence grows with horizon.
+* :meth:`Cosmos3TrajectoryDataset.split_by_combination` returns (seen, held-out) index lists for a
+  set of ``(embodiment, primitive)`` pairs, which is the compositional-generalisation split.
+* :meth:`Cosmos3TrajectoryDataset.latents` loads the tokenizer latents of a rollout for the
+  delta-hyperbolicity probe.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch import Tensor
 from torch.utils.data import Dataset
+
+from hyperbolic_world_model.data.cosmos3 import default_root
+from hyperbolic_world_model.data.cosmos3.generate import read_manifest
+
+
+@dataclass(frozen=True)
+class Window:
+    rollout: int  # index into the manifest records
+    start: int  # first frame index of the window
 
 
 class Cosmos3TrajectoryDataset(Dataset):
-    """Generated trajectories with branching structure.
+    """Windowed generated trajectories with branching structure.
 
-    TODO(phase 2): implement ``__init__`` (read manifest), ``__len__``, ``__getitem__``, ``branches``.
+    Args:
+        root: generated data root containing ``manifest.jsonl``.
+        horizon: predicted steps per window (``horizon + 1`` frames). ``None`` uses whole rollouts.
+        stride: window stride in frames.
+        image_size: output ``(H, W)`` or a single int; ``None`` keeps the stored resolution.
+        split: ``"train"``, ``"val"``, ``"test"`` or ``"all"``; rollouts are assigned to splits by a
+            deterministic hash of ``prompt_id`` with ``split_fractions``.
+        split_fractions: ``(train, val)`` fractions; the rest is ``test``.
+        cache: keep decoded rollouts in memory (fine for a few thousand short rollouts).
     """
 
-    def __init__(self, root: Path, split: str, horizon: int, image_size: int) -> None:
-        raise NotImplementedError(
-            "Cosmos3TrajectoryDataset is pending phase 2; generate data first with "
-            "scripts/generate_cosmos3_trajectories.sh"
-        )
+    def __init__(
+        self,
+        root: str | Path | None = None,
+        horizon: int | None = 8,
+        stride: int = 1,
+        image_size: int | tuple[int, int] | None = None,
+        split: str = "all",
+        split_fractions: tuple[float, float] = (0.8, 0.1),
+        cache: bool = True,
+    ) -> None:
+        self.root = Path(root) if root is not None else default_root()
+        self.records: list[dict[str, Any]] = read_manifest(self.root)
+        if not self.records:
+            raise FileNotFoundError(f"no manifest.jsonl under {self.root}; run generate.py first")
+        if horizon is not None and horizon < 1:
+            raise ValueError("horizon must be >= 1 or None")
+        if stride < 1:
+            raise ValueError("stride must be >= 1")
+        self.horizon = horizon
+        self.stride = int(stride)
+        self.image_size = (image_size, image_size) if isinstance(image_size, int) else image_size
+        self.split = split
+        self.cache = cache
+        self._cache: dict[int, tuple[Tensor, Tensor]] = {}
+
+        keep = self._split_indices(split, split_fractions)
+        self.windows: list[Window] = []
+        for i in keep:
+            n = int(self.records[i]["num_frames"])
+            h = n - 1 if horizon is None else horizon
+            if n < h + 1:
+                continue  # rollout too short for this horizon
+            for start in range(0, n - h, self.stride):
+                self.windows.append(Window(i, start))
+        self.action_dim = int(self.records[0]["action_dim"])
+
+    # ------------------------------------------------------------------ splits and groups
+    def _split_indices(self, split: str, fractions: tuple[float, float]) -> list[int]:
+        if split == "all":
+            return list(range(len(self.records)))
+        if split not in {"train", "val", "test"}:
+            raise ValueError("split must be train, val, test or all")
+        import zlib
+
+        out = []
+        for i, r in enumerate(self.records):
+            u = (zlib.crc32(str(r["prompt_id"]).encode()) % 10_000) / 10_000
+            name = "train" if u < fractions[0] else "val" if u < fractions[0] + fractions[1] else "test"
+            if name == split:
+                out.append(i)
+        return out
+
+    def branches(self, start_only: bool = True) -> dict[str, list[int]]:
+        """``prompt_id -> item indices`` of its branches (windows at offset 0 by default)."""
+        groups: dict[str, list[int]] = defaultdict(list)
+        for idx, w in enumerate(self.windows):
+            if start_only and w.start != 0:
+                continue
+            groups[str(self.records[w.rollout]["prompt_id"])].append(idx)
+        return dict(groups)
+
+    def branch_pairs(self) -> list[tuple[int, int]]:
+        """All unordered pairs of start windows that share a start frame (for divergence curves)."""
+        pairs = []
+        for idxs in self.branches().values():
+            for a in range(len(idxs)):
+                for b in range(a + 1, len(idxs)):
+                    pairs.append((idxs[a], idxs[b]))
+        return pairs
+
+    def combination(self, idx: int) -> tuple[str, str]:
+        r = self.records[self.windows[idx].rollout]
+        return str(r["embodiment"]), str(r["primitive"])
+
+    def combinations(self) -> set[tuple[str, str]]:
+        return {self.combination(i) for i in range(len(self))}
+
+    def split_by_combination(self, holdout: Sequence[Sequence[str]]) -> tuple[list[int], list[int]]:
+        """``(seen, held_out)`` item indices; ``holdout`` is a list of ``[embodiment, primitive]`` pairs.
+
+        Raises if a held-out combination never occurs, or if holding it out removes an embodiment
+        or a primitive entirely (then the task would test extrapolation, not composition).
+        """
+        held = {(str(e), str(p)) for e, p in holdout}
+        present = self.combinations()
+        missing = held - present
+        if missing:
+            raise ValueError(f"held-out combinations not present in the data: {sorted(missing)}")
+        seen_combos = present - held
+        if held and (
+            {e for e, _ in seen_combos} != {e for e, _ in present} or {p for _, p in seen_combos} != {p for _, p in present}
+        ):
+            raise ValueError("holding out these combinations removes an embodiment or primitive entirely")
+        seen, out = [], []
+        for i in range(len(self)):
+            (out if self.combination(i) in held else seen).append(i)
+        return seen, out
+
+    def metadata(self) -> list[dict[str, str]]:
+        """Per-item ``{embodiment, task, primitive}`` for :func:`data.hierarchies.build_hierarchy`."""
+        return [
+            {k: str(self.records[w.rollout][k]) for k in ("embodiment", "task", "primitive")} for w in self.windows
+        ]
+
+    # ------------------------------------------------------------------ loading
+    def _load_rollout(self, rollout: int) -> tuple[Tensor, Tensor]:
+        if rollout in self._cache:
+            return self._cache[rollout]
+        rec = self.records[rollout]
+        with np.load(self.root / rec["frames_path"]) as z:
+            frames = torch.from_numpy(z["frames"]).permute(0, 3, 1, 2).float() / 255.0  # (T, 3, H, W)
+            actions = torch.from_numpy(z["actions"]).float()
+        if self.image_size is not None and tuple(frames.shape[-2:]) != tuple(self.image_size):
+            frames = F.interpolate(frames, size=tuple(self.image_size), mode="bilinear", align_corners=False, antialias=True)
+        if self.cache:
+            self._cache[rollout] = (frames, actions)
+        return frames, actions
+
+    def latents(self, idx: int) -> tuple[np.ndarray, dict[str, Any]]:
+        """Tokenizer latents ``(T', D)`` of the rollout behind item ``idx`` (requires extract_latents)."""
+        from hyperbolic_world_model.data.cosmos3.extract_latents import load_latents
+
+        rec = self.records[self.windows[idx].rollout]
+        if not rec.get("latents_path"):
+            raise FileNotFoundError(f"no latents for {rec['prompt_id']}/{rec['branch_id']}; run extract_latents.py")
+        return load_latents(self.root / rec["latents_path"])
+
+    def __len__(self) -> int:
+        return len(self.windows)
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        w = self.windows[idx]
+        frames, actions = self._load_rollout(w.rollout)
+        h = (frames.shape[0] - 1) if self.horizon is None else self.horizon
+        rec = self.records[w.rollout]
+        meta = {
+            "prompt_id": str(rec["prompt_id"]),
+            "branch_id": str(rec["branch_id"]),
+            "embodiment": str(rec["embodiment"]),
+            "task": str(rec["task"]),
+            "primitive": str(rec["primitive"]),
+            "start": w.start,
+            "latents_path": rec.get("latents_path"),
+        }
+        return {"frames": frames[w.start : w.start + h + 1], "actions": actions[w.start : w.start + h], "meta": meta}
 
     @classmethod
     def from_config(cls, cfg: Mapping[str, Any], split: str = "train") -> Cosmos3TrajectoryDataset:
+        size = cfg.get("image_size")
         return cls(
-            root=Path(cfg["root"]),
+            root=cfg.get("root"),
+            horizon=None if cfg.get("horizon") in (None, "null") else int(cfg["horizon"]),
+            stride=int(cfg.get("stride", 1)),
+            image_size=None if size is None else (int(size) if isinstance(size, int) else tuple(int(s) for s in size)),
             split=split,
-            horizon=int(cfg["horizon"]),
-            image_size=int(cfg.get("image_size", 224)),
+            split_fractions=tuple(cfg.get("split_fractions", (0.8, 0.1))),
+            cache=bool(cfg.get("cache", True)),
         )
 
-    def branches(self) -> dict[str, list[int]]:
-        """Map prompt id -> indices of trajectories sharing that start frame. TODO(phase 2)."""
-        raise NotImplementedError
+    def __repr__(self) -> str:
+        return f"Cosmos3TrajectoryDataset(root={self.root}, split={self.split}, rollouts={len(self.records)}, windows={len(self)})"
 
 
-__all__ = ["Cosmos3TrajectoryDataset"]
+def load_manifest_as_json(root: Path) -> str:
+    """Convenience for reports: the manifest as a JSON array string."""
+    return json.dumps(read_manifest(root))
+
+
+__all__ = ["Cosmos3TrajectoryDataset", "Window", "load_manifest_as_json"]
