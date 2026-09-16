@@ -14,7 +14,7 @@
 
 **Author: A Taylor**
 
-> 🚧 **Status:** Geometry primitives stable · four metrics and four tasks implemented · one-command report · V-JEPA 2-AC head training · 465/465 tests passing.
+> 🚧 **Status:** Geometry primitives stable · four metrics and four tasks implemented · one-command report · V-JEPA 2-AC head training
 
 ---
 
