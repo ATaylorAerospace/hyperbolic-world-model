@@ -400,7 +400,7 @@ Trained predictor heads written to `checkpoints/predictors/` contain only the he
 
 ## 🤝 Contributing
 
-Ground rules, setup and the review checklist are in [CONTRIBUTING.md](CONTRIBUTING.md). The short version: geometry goes through `Manifold`, encoders stay frozen, curvature is swept, Cosmos 3 is inference-only, no new dependencies without discussion, and the README is updated in the same PR as the code.
+Issues, questions, docs fixes, tests and small focused pull requests are all welcome; everything runs on a laptop CPU with no downloads. [CONTRIBUTING.md](CONTRIBUTING.md) has the two-minute setup, the six rules that keep the science honest (distances in each model's own geometry, curvature swept, encoders frozen, Cosmos 3 inference-only, no new dependencies without an issue, no hand-written numbers), and a plain-words note on what the noncommercial licence means for contributors.
 
 ---
 
