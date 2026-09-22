@@ -198,6 +198,7 @@ Environment variables (copy `.env.example` to `.env`):
 │   │   ├── droid.py                   # action normalisation + chunking (done); DROID loader (TODO phase 2)
 │   │   ├── synthetic.py               # in-memory linear-dynamics trajectories for the smoke run; optional branches sharing a start frame
 │   │   ├── hierarchies.py             # embodiment > task > primitive tree, hop-count metric, adjacency
+│   │   ├── splits.py                  # one held-out (embodiment, primitive) split shared by the Cosmos dataset and the compositional task
 │   │   └── cosmos3/                   # generate.py (Cosmos 3 Nano forward-dynamics rollouts via cosmos-framework), extract_latents.py (vision-VAE latents), dataset.py (manifest loader)
 │   ├── metrics/
 │   │   ├── geodesic_error.py          # rollout error in native geometry, static baseline, per-horizon and normalised; Manifold only
@@ -228,7 +229,7 @@ Environment variables (copy `.env.example` to `.env`):
 │   ├── conftest.py                    # seeds, float32/float64 fixture
 │   ├── geometry/                      # test_base.py (contract over all geometries), test_poincare.py, test_lorentz.py, test_euclidean.py, test_utils.py, test_public_api.py, helpers.py
 │   ├── models/                        # test_predictor_heads.py (shapes, identical architecture, isometric twins), test_vjepa2.py (hub loader with fakes)
-│   ├── data/                          # test_cosmos3.py (generation pipeline, adapter chunk loop, latents, dataset; all with fakes)
+│   ├── data/                          # test_cosmos3.py (generation pipeline, adapter chunk loop, latents, dataset; all with fakes), test_splits.py (the shared held-out split)
 │   ├── metrics/                       # test_geodesic_error.py, test_gromov_hyperbolicity.py, test_distortion.py, test_dimension_efficiency.py
 │   ├── tasks/                         # test_base.py (registry, Fréchet mean, Spearman), one file per task, helpers.py (tiny bundles, branching datasets)
 │   ├── reporting/                     # test_tables.py, test_make_report.py (every file written, byte-identical rerun), helpers.py (fake outputs/ tree)
@@ -317,6 +318,7 @@ Environment variables (copy `.env.example` to `.env`):
 | `models/predictors/` | Heads | Identical architecture by construction (same seed gives identical weights; `architecture_signature` equal); action embedding concatenated to state coordinates; geodesic units in every geometry (Poincaré and Lorentz heads are isometric twins); `max_step` and `max_radius` guards shared, the retraction skipping its exp/log maps when no state is out of range, with `max_radius` (default 4) capped at the ball's representable radius so a config value the geometry cannot represent never becomes a silent per-curvature cap; `HyperbolicHead(Euclidean)` equals `EuclideanHead` exactly | ✅ |
 | `models/registry.py` | Config → objects | Refuses `frozen: false`; checks `embed_dim` against the loaded encoder | ✅ |
 | `data/hierarchies.py` | Metadata → tree | Hop-count metric is 0-hyperbolic (used as the δ reference); vectorised LCA distances (1.5k nodes in 0.4 s, was 14 s) | ✅ |
+| `data/splits.py` | Held-out split | One implementation of the (embodiment, primitive) hold-out used by the Cosmos dataset and the compositional-generalisation task; refuses missing pairs and splits that remove an embodiment or primitive | ✅ |
 | `data/synthetic.py` | CI trajectories | Deterministic, learnable linear dynamics, two-level hierarchy in metadata; `n_branches` groups episodes into prompts sharing a start frame (`branch_pairs`) so all four tasks run on CPU | ✅ |
 | `data/droid.py` | DROID | Action stats and chunking done; loader raises `NotImplementedError` with plan | 🚧 |
 | `data/cosmos3/generate.py` | Cosmos 3 rollouts | Standalone batch script: start frames + action JSON → `frames.npz`, `meta.json`, optional mp4, `manifest.jsonl`; per-branch deterministic seeds; idempotent; `--dry-run` plan; `Cosmos3Generator` drives cosmos-framework's `forward_dynamics` mode (Cosmos3-Nano, `droid_lerobot` 10-D actions) with one invocation per chunk level, zero padding, per-chunk seeds, autoregressive chaining and stitching so frame t+1 is the result of action t; mp4 via ffmpeg; not run on a real model | 🚧 |
@@ -340,10 +342,9 @@ uv run pytest -q
 ```
 
 ```text
-.....................................                                    [100%]
 =========================== short test summary info ============================
 SKIPPED [1] tests/data/test_cosmos3.py:284: needs ffmpeg
-468 passed, 1 skipped in 51.28s
+468 passed, 1 skipped in 28.90s
 ```
 
 | Suite | Tests | What it exercises |
