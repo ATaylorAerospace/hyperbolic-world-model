@@ -122,7 +122,8 @@ class MetaACPredictor(nn.Module):
         """
         self._check(tokens, actions, states)
         b, t, n, d = tokens.shape
-        out = self.model(tokens.flatten(1, 2), actions, states)
+        dt = next(self.model.parameters()).dtype
+        out = self.model(tokens.flatten(1, 2).to(dt), actions.to(dt), states.to(dt))
         if self.normalize_reps:
             out = F.layer_norm(out, (out.shape[-1],))
         return out.view(b, t, n, d)

@@ -51,6 +51,13 @@ class Euclidean(Manifold):
     def egrad2rgrad(self, x: Tensor, grad: Tensor) -> Tensor:
         return self._g.egrad2rgrad(x, grad)
 
+    def pairwise_dist(
+        self, x: Tensor, y: Tensor | None = None, chunk_rows: int | None = None
+    ) -> Tensor:
+        """Exact ``torch.cdist`` (no ``(n, m, d)`` broadcast; the mm-based mode is avoided for accuracy)."""
+        y = x if y is None else y
+        return torch.cdist(x, y, compute_mode="donot_use_mm_for_euclid_dist")
+
     def expmap0(self, u: Tensor) -> Tensor:
         return u
 

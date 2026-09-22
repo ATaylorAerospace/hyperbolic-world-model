@@ -155,6 +155,15 @@ def test_max_radius_retraction_bounds_every_latent(head: ActionConditionedPredic
     unit_raw = m.logmap0(raw) / m.dist0(raw).unsqueeze(-1)
     unit_pulled = m.logmap0(pulled) / m.dist0(pulled).unsqueeze(-1)
     assert torch.allclose(unit_raw, unit_pulled, atol=1e-3)
+    # Mixed batch: only the far rows move, near rows come back bit-identical, and a batch with
+    # nothing to retract returns the input object itself (the fast path).
+    mixed = torch.cat([raw[:2], near[:2, 0]], dim=0)
+    out = head.retract(mixed)
+    assert torch.equal(out[2:], near[:2, 0]) and torch.all(
+        m.dist0(out[:2]) <= head.max_radius + 1e-3
+    )
+    near0 = near[:, 0]
+    assert head.retract(near0) is near0
     off = HyperbolicHead(manifold=Euclidean(), max_radius=None, **KW)
     assert off.max_radius is None and torch.equal(
         off.retract(raw[:, : off.ambient_dim]), raw[:, : off.ambient_dim]

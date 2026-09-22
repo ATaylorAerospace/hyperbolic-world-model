@@ -130,10 +130,28 @@ class Manifold(ABC):
             t_t = t_t.unsqueeze(-1)
         return self.expmap(x, t_t * self.logmap(x, y))
 
-    def pairwise_dist(self, x: Tensor, y: Tensor | None = None) -> Tensor:
-        """All-pairs distance matrix ``(n, m)`` between rows of ``x`` ``(n, d)`` and ``y`` ``(m, d)``."""
+    #: Elements of the ``(rows, m, d)`` broadcast that :meth:`pairwise_dist` allows per chunk (~256 MB f32).
+    pairwise_budget: int = 64_000_000
+
+    def pairwise_dist(
+        self, x: Tensor, y: Tensor | None = None, chunk_rows: int | None = None
+    ) -> Tensor:
+        """All-pairs distance matrix ``(n, m)`` between rows of ``x`` ``(n, d)`` and ``y`` ``(m, d)``.
+
+        Curved geometries need the ``(n, m, d)`` broadcast (Möbius addition mixes coordinates), so
+        rows are processed in chunks sized to :attr:`pairwise_budget`; 500 x 500 x 1408 would
+        otherwise allocate 1.4 GB at once. ``chunk_rows`` overrides the automatic chunk size.
+        """
         y = x if y is None else y
-        return self.dist(x.unsqueeze(-2), y.unsqueeze(-3))
+        n, m, d = x.shape[0], y.shape[0], x.shape[-1]
+        rows = chunk_rows or max(1, self.pairwise_budget // max(m * d, 1))
+        if rows >= n:
+            return self.dist(x.unsqueeze(-2), y.unsqueeze(-3))
+        out = x.new_empty(n, m)
+        for start in range(0, n, rows):
+            xs = x[start : start + rows]
+            out[start : start + rows] = self.dist(xs.unsqueeze(-2), y.unsqueeze(-3))
+        return out
 
     def check_point(self, x: Tensor, atol: float | None = None) -> Tensor:
         """Boolean mask of which points lie on the manifold (within ``atol``). Default: all true."""

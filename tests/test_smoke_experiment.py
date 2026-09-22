@@ -52,6 +52,31 @@ def test_smoke_runs_end_to_end(tmp_path: Path, geometry: str) -> None:
     assert saved.geometry.name == geometry
 
 
+def test_latent_cache_encodes_the_dataset_once(tmp_path: Path) -> None:
+    from hyperbolic_world_model.data import build_dataset
+    from hyperbolic_world_model.models.registry import build_model
+    from hyperbolic_world_model.training.train_predictor import train
+
+    cfg = _compose(tmp_path)
+    ds = build_dataset(cfg.data, split="train")
+    n_batches = -(-len(ds) // int(cfg.training.batch_size))
+    for cache in (True, False):
+        bundle = build_model(cfg, action_dim=ds.action_dim)
+        calls = {"n": 0}
+        orig = bundle.encoder.forward
+
+        def counting(frames, _orig=orig, _calls=calls):
+            _calls["n"] += 1
+            return _orig(frames)
+
+        bundle.encoder.forward = counting  # type: ignore[method-assign]
+        cfg.training.cache_latents = cache
+        history = train(bundle, ds, cfg, "cpu")
+        assert history[-1]["loss"] < history[0]["loss"]
+        expected = n_batches if cache else n_batches * int(cfg.training.epochs)
+        assert calls["n"] == expected, (cache, calls["n"], expected)
+
+
 def test_encoder_stays_frozen(tmp_path: Path) -> None:
     """The frozen-encoder invariant: build_encoder refuses frozen=false and assert_frozen catches drift."""
     from hyperbolic_world_model.models.registry import build_encoder

@@ -28,7 +28,7 @@ from typing import Any
 import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 
 from hyperbolic_world_model.data import build_dataset
 from hyperbolic_world_model.data.synthetic import collate
@@ -69,8 +69,31 @@ def build_tasks(cfg: DictConfig) -> list[Task]:
     return [build_task(OmegaConf.to_container(task_cfg, resolve=True)) for task_cfg in cfg.tasks]
 
 
+@torch.no_grad()
+def encode_dataset(
+    bundle: ModelBundle, dataset: Dataset, batch_size: int, device: str
+) -> TensorDataset:
+    """Run the frozen encoder over the whole dataset once and return ``(latents, actions)`` tensors.
+
+    The encoder never changes, so re-encoding every epoch only burns compute: with the 1B-parameter
+    ViT-g the encoder forward dominates a head-training step. Latents live on ``device``.
+    """
+    bundle.encoder.assert_frozen()
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
+    zs, acts = [], []
+    for batch in loader:
+        zs.append(bundle.encoder.encode(batch["frames"].to(device)))
+        acts.append(batch["actions"].to(device))
+    return TensorDataset(torch.cat(zs), torch.cat(acts))
+
+
 def train(bundle: ModelBundle, dataset, cfg: DictConfig, device: str) -> list[dict[str, float]]:
-    """Optimise the head only. Returns a per-epoch log."""
+    """Optimise the head only. Returns a per-epoch log.
+
+    With ``training.cache_latents`` (default true) the dataset is encoded once by
+    :func:`encode_dataset` and the epochs iterate over cached latents; otherwise frames are
+    re-encoded every step (only useful when the latents do not fit in memory).
+    """
     bundle.encoder.assert_frozen()
     head = bundle.predictor.train()
     opt = build_optimizer(
@@ -78,22 +101,28 @@ def train(bundle: ModelBundle, dataset, cfg: DictConfig, device: str) -> list[di
         lr=float(cfg.training.lr),
         weight_decay=float(cfg.training.weight_decay),
     )
-    loader = DataLoader(
-        dataset,
-        batch_size=int(cfg.training.batch_size),
-        shuffle=True,
-        collate_fn=collate,
-        drop_last=False,
-    )
+    batch_size = int(cfg.training.batch_size)
+    cache = bool(cfg.training.get("cache_latents", True))
+    if cache:
+        loader = DataLoader(
+            encode_dataset(bundle, dataset, batch_size, device), batch_size=batch_size, shuffle=True
+        )
+    else:
+        loader = DataLoader(
+            dataset, batch_size=batch_size, shuffle=True, collate_fn=collate, drop_last=False
+        )
     history: list[dict[str, float]] = []
     for epoch in range(int(cfg.training.epochs)):
         total, n = 0.0, 0
         t0 = time.time()
         for batch in loader:
-            frames = batch["frames"].to(device)
-            actions = batch["actions"].to(device)
-            with torch.no_grad():
-                z = bundle.encoder.encode(frames)
+            if cache:
+                z, actions = batch
+            else:
+                frames = batch["frames"].to(device)
+                actions = batch["actions"].to(device)
+                with torch.no_grad():
+                    z = bundle.encoder.encode(frames)
             pred, target = head(z, actions)
             loss = head.loss(pred, target)
             opt.zero_grad(set_to_none=True)
@@ -103,8 +132,8 @@ def train(bundle: ModelBundle, dataset, cfg: DictConfig, device: str) -> list[di
                     head.trainable_parameters(), float(cfg.training.grad_clip)
                 )
             opt.step()
-            total += loss.item() * frames.shape[0]
-            n += frames.shape[0]
+            total += loss.item() * z.shape[0]
+            n += z.shape[0]
         rec = {"epoch": epoch, "loss": total / max(n, 1), "seconds": time.time() - t0}
         history.append(rec)
         log.info("epoch %d  loss=%.5f  (%.1fs)", epoch, rec["loss"], rec["seconds"])

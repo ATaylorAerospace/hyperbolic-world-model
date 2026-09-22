@@ -42,6 +42,12 @@ def test_geodesic_pairwise_and_check_point() -> None:
     assert torch.allclose(m.geodesic(x, y, 0.5), torch.full((4, 3), 0.5))
     pts = torch.tensor([[0.0, 0.0], [3.0, 4.0]])
     assert torch.allclose(m.pairwise_dist(pts), torch.tensor([[0.0, 5.0], [5.0, 0.0]]))
+    big = torch.randn(64, 300)
+    ref = (big[:, None] - big[None]).norm(dim=-1)
+    assert torch.allclose(
+        m.pairwise_dist(big), ref, atol=1e-4
+    )  # cdist exact mode, no (n, n, d) broadcast
+    assert torch.allclose(m.pairwise_dist(big[:5], big[:9]), ref[:5, :9], atol=1e-4)
     assert m.check_point(pts * 1e9).all()
 
 
