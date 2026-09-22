@@ -8,7 +8,6 @@ import math
 import geoopt
 import pytest
 import torch
-from tests.geometry.helpers import random_points, random_tangents
 
 from hyperbolic_world_model.geometry import Lorentz, PoincareBall, build_manifold
 from hyperbolic_world_model.geometry.lorentz import (
@@ -16,6 +15,7 @@ from hyperbolic_world_model.geometry.lorentz import (
     minkowski_inner,
     poincare_to_lorentz,
 )
+from tests.geometry.helpers import random_points, random_tangents
 
 CURVATURES = [-0.5, -1.0, -2.0]
 

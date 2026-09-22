@@ -64,7 +64,9 @@ either outcome is visible.
 
 - **Hypothesis.** At equal latent dimension, the best swept curvature gives lower normalised
   geodesic rollout error than the Euclidean head at horizons beyond one step.
-- **Metric.** `geodesic_error_per_horizon` and `normalised_error_hmax` in each model's geometry.
+- **Metric.** `geodesic_error_{h1,hmax,mean}` and `normalised_error_{h1,hmax,mean}` in each
+  model's geometry (the normalised error is the ratio of the mean rollout error to the mean
+  static-baseline error at each horizon); the full curves are written next to the scalars.
 - **Falsified if** no curvature in the sweep beats the Euclidean baseline's normalised error at
   any horizon `h > 1` by more than one seed standard deviation, at any latent dimension.
 - **Data.** DROID (real), Cosmos 3 generated trajectories (controlled), synthetic (CI only).
@@ -75,7 +77,12 @@ either outcome is visible.
   embodiment > task > primitive tree with lower average distortion and higher mAP in hyperbolic
   space than in Euclidean space at the same dimension, and `dist0` (distance from origin)
   correlates with tree depth.
-- **Metric.** `average_distortion` (scale-fitted), `mean_average_precision`, Spearman(depth, dist0).
+- **Metric.** `average_distortion` (scale-fitted), `map` (`mean_average_precision`),
+  `depth_spearman` (Spearman of tree depth against `dist0`), each with a `*_std` from
+  bootstrap resamples of the trajectories within every leaf (`n_seeds`). Trajectories are pooled
+  over time, and tree nodes over the trajectories in their subtree, with a Fréchet mean on the
+  head's manifold (`tasks/base.py::frechet_mean`, Riemannian descent with a backtracking line
+  search), never with a coordinate average.
 - **Falsified if** the best curvature does not improve both distortion and mAP over Euclidean by
   more than the seed standard deviation, or if the depth correlation is not positive.
 - **Data.** DROID metadata; synthetic hierarchy for CI.
@@ -85,20 +92,30 @@ either outcome is visible.
 - **Hypothesis.** For rollouts sharing a start frame but differing in actions (Cosmos 3
   branches), latent divergence tracks video divergence with higher correlation, and saturates
   later, in hyperbolic space.
-- **Metric.** Spearman correlation between geodesic latent divergence and encoder-space divergence
-  of the generated frames as a function of horizon; horizon at which latent divergence saturates.
+- **Metric.** `divergence_spearman`: Spearman correlation, pooled over pairs and horizons,
+  between the geodesic distance of the two open-loop rollouts (`latent_divergence`, in the head's
+  geometry) and the Euclidean distance between the frozen encoder's outputs for the two generated
+  frames (`encoder_divergence`, the encoder's own space); the per-horizon correlation is in the
+  curves. `saturation_horizon`: first horizon at which the mean latent divergence reaches 95% of
+  its maximum (later is better). `embedded_divergence` (the embedded true frames) and
+  `pixel_divergence` (frame RMSE) are reported as controls.
 - **Falsified if** the correlation is not higher, or saturation is not later, for the best
   curvature versus Euclidean.
-- **Data.** Cosmos 3 generated branching trajectories.
+- **Data.** Cosmos 3 generated branching trajectories (`branch_pairs`); synthetic prompts with
+  `n_branches > 1` for CI.
 
 ### Compositional generalisation (`tasks/compositional_generalization.py`)
 
 - **Hypothesis.** Holding out (embodiment, primitive) combinations, the gap between unseen and
   seen rollout error is smaller in hyperbolic space.
-- **Metric.** `unseen_error - seen_error` (normalised, native geometry), per curvature.
+- **Metric.** `gap_normalised_error_hmax` = `unseen_normalised_error_hmax - seen_normalised_error_hmax`
+  (native geometry, per curvature), with the raw gaps, the unseen/seen ratio and both subsets'
+  full rollout summaries alongside so a smaller gap caused by worse seen error is visible. The
+  trainer excludes the held-out combinations from the training set.
 - **Falsified if** the gap is not smaller for the best curvature, or is smaller only because seen
   error got worse.
-- **Data.** DROID with `data.holdout_combinations`.
+- **Data.** DROID or Cosmos 3 generated data with `data.holdout_combinations`; synthetic data
+  with e.g. `[[arm_b, grasp]]` for CI.
 
 ### Latent-space probe: delta-hyperbolicity (`metrics/gromov_hyperbolicity.py`)
 
@@ -131,7 +148,7 @@ axis). The headline claim, if the hypothesis holds, is "hyperbolic reaches error
   out), so `max_step`, `embed_scale` and `max_radius` mean the same thing for every head, and the
   Poincaré and Lorentz heads at equal curvature are isometric twins (tested).
 - Every head applies the same numerical guard: proposed updates are clipped to `max_step` and any
-  state beyond `max_radius` (default 8) is retracted along its geodesic to the origin. In flat
+  state beyond `max_radius` (default 4) is retracted along its geodesic to the origin. In flat
   space this is a norm clip. It exists because float32 hyperbolic geometries lose accuracy
   exponentially with distance (below); without it a Lorentz rollout of five maximal steps
   produced NaNs in testing.
@@ -139,6 +156,15 @@ axis). The headline claim, if the hypothesis holds, is "hyperbolic reaches error
   layer-normalised tokens: the native-geometry rule applied to a Euclidean token-space model.
 
 ## Numerical caveats (measured, see `tests/geometry`)
+
+- The Poincaré ball clips points to `(1 - eps) * radius`, so nothing can lie farther than
+  `reliable_radius(c) = (2 / sqrt(-c)) * artanh(1 - eps)` from the origin: 6.2 units at `c = -1`,
+  4.4 at `c = -2`, 3.1 at `c = -4` in float32 (`geometry/utils.py::reliable_radius`). Every head
+  therefore enforces `min(max_radius, reliable_radius(c))`, in every geometry, so a config value
+  the ball cannot represent never turns into a silent per-curvature cap and the Poincaré and
+  Lorentz heads at the same curvature keep identical guards.
+- The default `max_radius` is 4 because the float32 hyperboloid's self-distance noise is 0.01 at
+  4 units, 0.09 at 6 and 0.7 at 8; at 8 the squared-distance loss floor would exceed a real step.
 
 The curved geometries delegate to geoopt (`geoopt.PoincareBall`, `geoopt.Lorentz`); we keep our
 own code only for the Lorentz parallel transport (geoopt's divides by the squared distance and is

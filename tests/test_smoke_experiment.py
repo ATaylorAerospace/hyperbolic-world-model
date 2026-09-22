@@ -100,3 +100,30 @@ def test_hyperbolic_head_on_euclidean_manifold_matches_euclidean_head() -> None:
     pb, tb = b(z, act)
     assert torch.allclose(pa, pb, atol=1e-6) and torch.allclose(ta, tb)
     assert torch.allclose(a.loss(pa, ta), b.loss(pb, tb))
+
+
+def test_smoke_runs_all_four_tasks_on_branched_synthetic_data(tmp_path: Path) -> None:
+    """``tasks=all`` needs branching rollouts and a held-out combination; both exist on CPU."""
+    cfg = _compose(
+        tmp_path,
+        "tasks=all",
+        "data.n_branches=2",
+        "data.holdout_combinations=[[arm_b,grasp]]",
+        "training.epochs=3",
+    )
+    out = run(cfg)
+    assert out["n_train"] == 48
+    names = [r.task for r in out["results"]]
+    assert names == [
+        "latent_rollout",
+        "hierarchy_reconstruction",
+        "long_horizon_consistency",
+        "compositional_generalization",
+    ]
+    payload = json.loads((tmp_path / "metrics.json").read_text())
+    assert payload["seed"] == 0 and set(payload["tasks"]) == set(names)
+    assert (
+        payload["tasks"]["long_horizon_consistency"]["metrics"]["n_pairs"] == 32
+    )  # 64 / 2 prompts
+    for name in names:
+        assert (tmp_path / f"{name}_curves.csv").exists()

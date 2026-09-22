@@ -37,7 +37,7 @@ class HyperbolicHead(ActionConditionedPredictor):
         embed_scale: float = 1.0,
         max_step: float = 5.0,
         seed: int = 0,
-        max_radius: float | None = 8.0,
+        max_radius: float | None = 4.0,
     ) -> None:
         super().__init__(
             manifold=manifold,

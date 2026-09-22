@@ -6,6 +6,8 @@ one import path; the remaining helpers are ours because geoopt has no equivalent
 
 from __future__ import annotations
 
+import math
+
 import torch
 from geoopt.manifolds.lorentz.math import arcosh as _geoopt_arcosh
 from geoopt.manifolds.stereographic.math import artanh as _geoopt_artanh
@@ -38,6 +40,21 @@ def eps(dtype: torch.dtype) -> float:
 def min_norm(dtype: torch.dtype) -> float:
     """Smallest norm we are willing to divide by for ``dtype``."""
     return MIN_NORM.get(dtype, MIN_NORM[torch.float32])
+
+
+def reliable_radius(curvature: float, dtype: torch.dtype = torch.float32) -> float:
+    """Largest geodesic distance from the origin representable at ``curvature`` in ``dtype``.
+
+    The Poincaré ball of curvature ``c < 0`` clips points to ``(1 - eps) * radius`` (``eps`` from
+    :data:`BOUNDARY_EPS`), so no latent can lie farther than
+    ``(2 / sqrt(-c)) * artanh(1 - eps)`` from the origin whatever a config asks for: 6.2 units at
+    ``c = -1`` in float32, 3.1 at ``c = -4``. The predictor heads cap their ``max_radius`` at this
+    value, in every geometry, so the Poincaré and Lorentz heads at the same curvature keep
+    identical guards. Flat space (``c >= 0``) has no bound and returns ``inf``.
+    """
+    if curvature >= 0:
+        return math.inf
+    return (2.0 / math.sqrt(-curvature)) * math.atanh(1.0 - eps(dtype))
 
 
 def artanh(x: Tensor) -> Tensor:
@@ -75,5 +92,6 @@ __all__ = [
     "clip_norm",
     "eps",
     "min_norm",
+    "reliable_radius",
     "safe_norm",
 ]

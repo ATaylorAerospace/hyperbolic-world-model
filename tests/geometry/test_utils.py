@@ -13,6 +13,7 @@ from hyperbolic_world_model.geometry.utils import (
     clip_norm,
     eps,
     min_norm,
+    reliable_radius,
     safe_norm,
 )
 
@@ -80,3 +81,19 @@ def test_clip_norm_only_shrinks(dtype: torch.dtype) -> None:
 def test_helpers_keep_shape(fn) -> None:
     x = torch.full((2, 3, 4), 1.2 if fn is arcosh else 0.3)
     assert fn(x).shape == x.shape
+
+
+@pytest.mark.parametrize("c", [-0.5, -1.0, -2.0, -4.0])
+def test_reliable_radius_is_where_the_ball_clip_lands(c: float, dtype: torch.dtype) -> None:
+    """A tangent far beyond the boundary lands exactly at the clip radius; flat space is unbounded."""
+    from hyperbolic_world_model.geometry import Euclidean, PoincareBall
+
+    m = PoincareBall(c=c)
+    huge = torch.zeros(3, dtype=dtype)
+    huge[0] = 1e3
+    landed = float(m.dist0(m.expmap0(huge)))
+    assert landed == pytest.approx(reliable_radius(c, dtype), rel=1e-3)
+    assert reliable_radius(c, dtype) < reliable_radius(c / 2, dtype)  # weaker curvature, larger
+    assert reliable_radius(c, torch.float32) < reliable_radius(c, torch.float64)
+    assert reliable_radius(Euclidean().curvature, dtype) == float("inf")
+    assert reliable_radius(-1.0, torch.float32) == pytest.approx(6.21, abs=0.01)

@@ -12,7 +12,7 @@ from torch import Tensor
 
 from hyperbolic_world_model.geometry.base import Manifold
 from hyperbolic_world_model.geometry.euclidean import Euclidean
-from hyperbolic_world_model.models.predictors.base import ActionConditionedPredictor, make_mlp
+from hyperbolic_world_model.models.predictors.base import ActionConditionedPredictor
 
 
 class EuclideanHead(ActionConditionedPredictor):
@@ -29,7 +29,7 @@ class EuclideanHead(ActionConditionedPredictor):
         embed_scale: float = 1.0,
         max_step: float = 5.0,
         seed: int = 0,
-        max_radius: float | None = 8.0,
+        max_radius: float | None = 4.0,
         manifold: Manifold | None = None,
     ) -> None:
         manifold = Euclidean() if manifold is None else manifold
@@ -55,4 +55,4 @@ class EuclideanHead(ActionConditionedPredictor):
         return self.retract(state + self.delta(state, action))
 
 
-__all__ = ["EuclideanHead", "make_mlp"]
+__all__ = ["EuclideanHead"]

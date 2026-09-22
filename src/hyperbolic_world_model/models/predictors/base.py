@@ -23,13 +23,16 @@ regularisation on ``logmap0`` coordinates) and compare against the frozen projec
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
 import torch
 from torch import Tensor, nn
 
 from hyperbolic_world_model.geometry.base import Manifold
-from hyperbolic_world_model.geometry.utils import clip_norm
+from hyperbolic_world_model.geometry.utils import clip_norm, reliable_radius
+
+log = logging.getLogger(__name__)
 
 
 def make_mlp(in_dim: int, hidden_dim: int, out_dim: int, n_layers: int) -> nn.Sequential:
@@ -65,8 +68,13 @@ class ActionConditionedPredictor(nn.Module, ABC):
         max_radius: states (embedded or predicted) farther than this from the origin are
             retracted along their geodesic to the origin down to this distance. Float32
             hyperbolic geometries lose accuracy exponentially with distance (see
-            ``docs/methodology.md``), so this bounds every latent to the reliable region; in flat
-            space it is a norm clip. Applied identically in both heads. ``None`` disables it.
+            ``docs/methodology.md``: the hyperboloid's self-distance noise is 0.01 at 4 units and
+            0.7 at 8), so this bounds every latent to the reliable region; in flat space it is a
+            norm clip. Applied identically in both heads. The value actually enforced is
+            ``min(max_radius, reliable_radius(curvature))``, because the Poincaré ball cannot
+            represent points beyond its boundary clip at all (6.2 units at ``c = -1``, 3.1 at
+            ``c = -4`` in float32); the cap applies to every geometry so heads at the same
+            curvature keep identical guards. ``None`` disables the guard.
         seed: seed for the frozen projection **and** for the initial weights, so two heads built
             with the same seed start from identical parameters regardless of construction order.
     """
@@ -83,7 +91,7 @@ class ActionConditionedPredictor(nn.Module, ABC):
         embed_scale: float = 1.0,
         max_step: float = 5.0,
         seed: int = 0,
-        max_radius: float | None = 8.0,
+        max_radius: float | None = 4.0,
     ) -> None:
         super().__init__()
         self.manifold = manifold
@@ -93,7 +101,20 @@ class ActionConditionedPredictor(nn.Module, ABC):
         self.action_embed_dim = int(action_embed_dim)
         self.embed_scale = float(embed_scale)
         self.max_step = float(max_step)
-        self.max_radius = None if max_radius is None else float(max_radius)
+        self.requested_max_radius = None if max_radius is None else float(max_radius)
+        self.max_radius = self.requested_max_radius
+        if self.max_radius is not None:
+            cap = reliable_radius(manifold.curvature, torch.float32)
+            if self.max_radius > cap:
+                log.warning(
+                    "max_radius=%.3g exceeds the representable radius %.3g at curvature %g "
+                    "(Poincaré boundary clip in float32); using %.3g in every geometry",
+                    self.max_radius,
+                    cap,
+                    manifold.curvature,
+                    cap,
+                )
+                self.max_radius = cap
         gen = torch.Generator().manual_seed(seed)
         proj = torch.randn(self.encoder_dim, self.latent_dim, generator=gen)
         # Orthonormal columns so the projection neither inflates nor shrinks typical norms.

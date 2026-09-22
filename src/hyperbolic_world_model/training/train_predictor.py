@@ -9,7 +9,11 @@ Invariants enforced here (see docs/methodology.md):
     * ``encoder.assert_frozen()`` runs before the first optimiser step and again before writing
       any checkpoint; only ``predictor.state_dict()`` is ever saved.
     * the loss is ``predictor.loss`` = squared geodesic distance in the head's geometry.
-    * the geometry and curvature are written next to every metric.
+    * the geometry, curvature, latent dimension and seed are written next to every metric.
+    * every configured task is built *before* training so a misconfigured task fails fast.
+    * when ``data.holdout_combinations`` is set, the head is trained on the seen
+      (embodiment, primitive) combinations only, so the compositional-generalisation task
+      evaluates combinations the head never saw.
 """
 
 from __future__ import annotations
@@ -24,12 +28,16 @@ from typing import Any
 import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 
 from hyperbolic_world_model.data import build_dataset
 from hyperbolic_world_model.data.synthetic import collate
 from hyperbolic_world_model.models.registry import ModelBundle, build_model
-from hyperbolic_world_model.tasks import build_task
+from hyperbolic_world_model.tasks import Task, build_task
+from hyperbolic_world_model.tasks.compositional_generalization import (
+    normalise_holdout,
+    split_dataset_by_combination,
+)
 from hyperbolic_world_model.training.riemannian_optim import build_optimizer
 
 log = logging.getLogger(__name__)
@@ -41,8 +49,30 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def training_subset(dataset: Dataset, holdout) -> Dataset:
+    """The seen-combination subset of ``dataset`` when ``holdout`` is non-empty, else ``dataset``."""
+    holdout = normalise_holdout(holdout)
+    if not holdout:
+        return dataset
+    seen, held = split_dataset_by_combination(dataset, holdout)
+    log.info(
+        "training on %d seen items; %d items of held-out combinations %s excluded",
+        len(seen),
+        len(held),
+        [list(c) for c in holdout],
+    )
+    return Subset(dataset, seen)
+
+
+def build_tasks(cfg: DictConfig) -> list[Task]:
+    """Instantiate every task in ``cfg.tasks`` (done before training so bad configs fail fast)."""
+    return [build_task(OmegaConf.to_container(task_cfg, resolve=True)) for task_cfg in cfg.tasks]
+
+
 @torch.no_grad()
-def encode_dataset(bundle: ModelBundle, dataset, batch_size: int, device: str) -> TensorDataset:
+def encode_dataset(
+    bundle: ModelBundle, dataset: Dataset, batch_size: int, device: str
+) -> TensorDataset:
     """Run the frozen encoder over the whole dataset once and return ``(latents, actions)`` tensors.
 
     The encoder never changes, so re-encoding every epoch only burns compute: with the 1B-parameter
@@ -111,18 +141,30 @@ def train(bundle: ModelBundle, dataset, cfg: DictConfig, device: str) -> list[di
     return history
 
 
-def evaluate(bundle: ModelBundle, dataset, cfg: DictConfig, device: str) -> list[dict[str, Any]]:
-    """Run every task listed in ``cfg.tasks`` (a list of task configs) and return JSON-able results."""
+def evaluate(
+    bundle: ModelBundle,
+    dataset,
+    cfg: DictConfig,
+    device: str,
+    tasks: list[Task] | None = None,
+) -> list[Any]:
+    """Run every task listed in ``cfg.tasks`` (or the pre-built ``tasks``) and return the results."""
     out = []
-    for task_cfg in cfg.tasks:
-        task = build_task(OmegaConf.to_container(task_cfg, resolve=True))
+    for task in build_tasks(cfg) if tasks is None else tasks:
         res = task.run(bundle, dataset, device=device)
         log.info("task %s (%s, K=%s): %s", res.task, res.geometry, res.curvature, res.metrics)
         out.append(res)
     return out
 
 
-def write_outputs(out_dir: Path, cfg: DictConfig, bundle: ModelBundle, history, results) -> None:
+def write_outputs(
+    out_dir: Path,
+    cfg: DictConfig,
+    bundle: ModelBundle,
+    history,
+    results,
+    n_train: int | None = None,
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(cfg, out_dir / "config.yaml")
     payload = {
@@ -130,7 +172,9 @@ def write_outputs(out_dir: Path, cfg: DictConfig, bundle: ModelBundle, history, 
         "geometry": bundle.manifold.name,
         "curvature": bundle.manifold.curvature,
         "latent_dim": bundle.predictor.latent_dim,
+        "seed": int(cfg.seed),
         "model": bundle.name,
+        "n_train": n_train,
         "train_history": history,
         "tasks": {r.task: r.to_json_dict() for r in results},
     }
@@ -151,14 +195,21 @@ def run(cfg: DictConfig) -> dict[str, Any]:
     """Programmatic entry point (used by ``tests/test_smoke_experiment.py``)."""
     device = os.environ.get("HWM_DEVICE", cfg.get("device", "cpu"))
     set_seed(int(cfg.seed))
+    tasks = build_tasks(cfg)
     train_ds = build_dataset(cfg.data, split="train")
     eval_ds = build_dataset(cfg.data, split="val")
     bundle = build_model(cfg, action_dim=int(train_ds.action_dim), device=device)
-    history = train(bundle, train_ds, cfg, device)
-    results = evaluate(bundle, eval_ds, cfg, device)
+    train_subset = training_subset(train_ds, cfg.data.get("holdout_combinations"))
+    history = train(bundle, train_subset, cfg, device)
+    results = evaluate(bundle, eval_ds, cfg, device, tasks=tasks)
     out_dir = Path(cfg.output_dir)
-    write_outputs(out_dir, cfg, bundle, history, results)
-    return {"history": history, "results": results, "output_dir": str(out_dir)}
+    write_outputs(out_dir, cfg, bundle, history, results, n_train=len(train_subset))
+    return {
+        "history": history,
+        "results": results,
+        "output_dir": str(out_dir),
+        "n_train": len(train_subset),
+    }
 
 
 @hydra.main(config_path=CONFIG_DIR, config_name="config", version_base="1.3")

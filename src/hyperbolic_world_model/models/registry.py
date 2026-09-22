@@ -7,7 +7,7 @@ Config shape (see ``configs/models/*.yaml``)::
       encoder: {...}                # loader-specific; must contain frozen: true
       embed_dim: 1408
       head: {type: euclidean | hyperbolic, latent_dim: 64, hidden_dim: 256, n_layers: 2,
-             action_embed_dim: 32, embed_scale: 1.0, max_step: 5.0, max_radius: 8.0, seed: 0}
+             action_embed_dim: 32, embed_scale: 1.0, max_step: 5.0, max_radius: 4.0, seed: 0}
     geometry:
       name: euclidean | poincare | lorentz
       curvature: -1.0
@@ -117,8 +117,8 @@ def build_predictor(
         embed_scale=float(cfg.get("embed_scale", 1.0)),
         max_step=float(cfg.get("max_step", 5.0)),
         max_radius=None
-        if cfg.get("max_radius", 8.0) is None
-        else float(cfg.get("max_radius", 8.0)),
+        if cfg.get("max_radius", 4.0) is None
+        else float(cfg.get("max_radius", 4.0)),
         seed=int(cfg.get("seed", 0)),
     )
     if head_type == "euclidean":

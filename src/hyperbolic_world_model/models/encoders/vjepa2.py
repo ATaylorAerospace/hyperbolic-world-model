@@ -196,11 +196,6 @@ class VJEPA2ACEncoder(FrozenEncoder):
         self.register_buffer("image_std", torch.tensor(image_std).view(1, 1, 3, 1, 1))
         self.freeze()
 
-    @property
-    def param_dtype(self) -> torch.dtype:
-        """dtype of the wrapped model's parameters (inputs are cast to it)."""
-        return next(self.model.parameters()).dtype
-
     def tokens_per_frame(self, height: int, width: int) -> int:
         """Number of patch tokens the encoder produces for one ``height x width`` frame."""
         return (height // self.patch_size) * (width // self.patch_size)
@@ -216,12 +211,16 @@ class VJEPA2ACEncoder(FrozenEncoder):
         if h % self.patch_size or w % self.patch_size:
             raise ValueError(f"H and W must be multiples of {self.patch_size}, got {(h, w)}")
         x = (frames.to(self.image_mean.dtype) - self.image_mean) / self.image_std
-        x = x.to(self.param_dtype)  # the hub model may be bf16 on GPU; buffers stay float32
         # Meta encodes each frame alone as a `tubelet_size`-frame clip of the same frame.
         clip = (
             x.flatten(0, 1).unsqueeze(2).repeat(1, 1, self.tubelet_size, 1, 1)
         )  # (B*T, 3, tubelet, H, W)
-        tokens = self.model(clip)  # (B*T, N, D)
+        # The wrapped encoder may run in bfloat16 on GPU while the normalisation buffers stay
+        # float32; feed it its own parameter dtype and compute the tokens back in float32.
+        param = next(self.model.parameters(), None)
+        if param is not None and param.dtype != clip.dtype:
+            clip = clip.to(param.dtype)
+        tokens = self.model(clip).to(x.dtype)  # (B*T, N, D)
         tokens = tokens.reshape(b, t, -1, self.embed_dim)
         if self.normalize_reps:
             tokens = F.layer_norm(tokens, (self.embed_dim,))

@@ -108,16 +108,6 @@ def test_encoder_forward_returns_patch_and_pooled_embeddings(fake_hub: dict) -> 
         enc(torch.rand(2, 3, IMG, IMG))
 
 
-def test_bf16_model_accepts_float32_frames_and_actions(fake_hub: dict) -> None:
-    enc = v.load_vjepa2_ac(pretrained=False, dtype=torch.bfloat16)
-    assert enc.param_dtype == torch.bfloat16 and enc.image_mean.dtype == torch.float32
-    out = enc(torch.rand(1, 2, 3, IMG, IMG))
-    assert out.patch.dtype == torch.bfloat16 and out.patch.shape == (1, 2, N, D)
-    ref = enc.reference_predictor
-    pred = ref(out.patch, torch.randn(1, 2, ref.action_dim), torch.randn(1, 2, ref.state_dim))
-    assert pred.shape == (1, 2, N, D) and torch.isfinite(pred.float()).all()
-
-
 def test_normalize_reps_off_keeps_raw_tokens(fake_hub: dict) -> None:
     enc = v.load_vjepa2_ac(pretrained=False, normalize_reps=False)
     frames = torch.rand(1, 2, 3, IMG, IMG)
@@ -243,3 +233,13 @@ def test_registry_builds_vjepa2_ac_bundle_with_reference_predictor(fake_hub: dic
         build_encoder({**model_cfg, "encoder": {"frozen": False, "pretrained": False}})
     with pytest.raises(ValueError, match="embed_dim"):
         build_encoder({**model_cfg, "embed_dim": D + 1})
+
+
+def test_forward_feeds_the_encoder_its_own_dtype(fake_hub: dict) -> None:
+    """A reduced- or higher-precision encoder still takes float32 frames and returns float32."""
+    enc = v.load_vjepa2_ac(pretrained=False, dtype=torch.float64)
+    assert next(enc.model.parameters()).dtype == torch.float64
+    assert enc.image_mean.dtype == torch.float32  # buffers are untouched by the encoder cast
+    out = enc(torch.rand(1, 2, 3, IMG, IMG))
+    assert out.patch.dtype == out.pooled.dtype == torch.float32
+    assert out.patch.shape == (1, 2, N, D) and torch.isfinite(out.patch).all()
