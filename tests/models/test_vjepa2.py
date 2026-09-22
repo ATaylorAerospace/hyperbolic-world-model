@@ -108,6 +108,16 @@ def test_encoder_forward_returns_patch_and_pooled_embeddings(fake_hub: dict) -> 
         enc(torch.rand(2, 3, IMG, IMG))
 
 
+def test_bf16_model_accepts_float32_frames_and_actions(fake_hub: dict) -> None:
+    enc = v.load_vjepa2_ac(pretrained=False, dtype=torch.bfloat16)
+    assert enc.param_dtype == torch.bfloat16 and enc.image_mean.dtype == torch.float32
+    out = enc(torch.rand(1, 2, 3, IMG, IMG))
+    assert out.patch.dtype == torch.bfloat16 and out.patch.shape == (1, 2, N, D)
+    ref = enc.reference_predictor
+    pred = ref(out.patch, torch.randn(1, 2, ref.action_dim), torch.randn(1, 2, ref.state_dim))
+    assert pred.shape == (1, 2, N, D) and torch.isfinite(pred.float()).all()
+
+
 def test_normalize_reps_off_keeps_raw_tokens(fake_hub: dict) -> None:
     enc = v.load_vjepa2_ac(pretrained=False, normalize_reps=False)
     frames = torch.rand(1, 2, 3, IMG, IMG)

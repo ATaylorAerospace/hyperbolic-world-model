@@ -68,3 +68,6 @@ twice gives identical output.
 | `DATA_ROOT` | `data` | Root for datasets |
 | `CKPT_ROOT` | `checkpoints` | Root for encoder weights and trained heads |
 | `HWM_DEVICE` | config `device` (`cpu`) | Forces the device (CI sets `cpu`) |
+
+`training.cache_latents` (default `true`) encodes the dataset once with the frozen encoder and trains
+the head on cached latents; set it to `false` only when the latents do not fit in memory.

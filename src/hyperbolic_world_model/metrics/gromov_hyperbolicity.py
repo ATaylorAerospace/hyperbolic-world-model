@@ -28,11 +28,24 @@ def _gromov_products(dist: Tensor, base: int) -> Tensor:
     return 0.5 * (row.unsqueeze(1) + row.unsqueeze(0) - dist)
 
 
+#: Elements of the ``(rows, n, n)`` intermediate allowed per chunk (16M float64 = 128 MB).
+MAXMIN_BUDGET = 16_000_000
+
+
+def _chunk_rows(n: int, budget: int = MAXMIN_BUDGET) -> int:
+    """Rows per chunk so that ``rows * n * n`` stays within ``budget`` (at least one row)."""
+    return max(1, min(n, budget // max(n * n, 1)))
+
+
 def _max_min_product(a: Tensor, b: Tensor) -> Tensor:
-    """``(A (*) B)[i, j] = max_k min(A[i, k], B[k, j])`` computed in chunks to bound memory."""
+    """``(A (*) B)[i, j] = max_k min(A[i, k], B[k, j])`` computed in row chunks to bound memory.
+
+    The intermediate is ``(rows, n, n)``; the previous ``512 * 512 // n`` rule bounded ``rows * n``
+    instead and allocated 1 GB at ``n = 500``.
+    """
     n = a.shape[0]
     out = torch.empty_like(a)
-    chunk = max(1, min(n, 512 * 512 // max(n, 1)))
+    chunk = _chunk_rows(n)
     for start in range(0, n, chunk):
         sl = slice(start, start + chunk)
         out[sl] = torch.minimum(a[sl].unsqueeze(2), b.unsqueeze(0)).amax(dim=1)

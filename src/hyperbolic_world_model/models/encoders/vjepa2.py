@@ -122,7 +122,8 @@ class MetaACPredictor(nn.Module):
         """
         self._check(tokens, actions, states)
         b, t, n, d = tokens.shape
-        out = self.model(tokens.flatten(1, 2), actions, states)
+        dt = next(self.model.parameters()).dtype
+        out = self.model(tokens.flatten(1, 2).to(dt), actions.to(dt), states.to(dt))
         if self.normalize_reps:
             out = F.layer_norm(out, (out.shape[-1],))
         return out.view(b, t, n, d)
@@ -195,6 +196,11 @@ class VJEPA2ACEncoder(FrozenEncoder):
         self.register_buffer("image_std", torch.tensor(image_std).view(1, 1, 3, 1, 1))
         self.freeze()
 
+    @property
+    def param_dtype(self) -> torch.dtype:
+        """dtype of the wrapped model's parameters (inputs are cast to it)."""
+        return next(self.model.parameters()).dtype
+
     def tokens_per_frame(self, height: int, width: int) -> int:
         """Number of patch tokens the encoder produces for one ``height x width`` frame."""
         return (height // self.patch_size) * (width // self.patch_size)
@@ -210,6 +216,7 @@ class VJEPA2ACEncoder(FrozenEncoder):
         if h % self.patch_size or w % self.patch_size:
             raise ValueError(f"H and W must be multiples of {self.patch_size}, got {(h, w)}")
         x = (frames.to(self.image_mean.dtype) - self.image_mean) / self.image_std
+        x = x.to(self.param_dtype)  # the hub model may be bf16 on GPU; buffers stay float32
         # Meta encodes each frame alone as a `tubelet_size`-frame clip of the same frame.
         clip = (
             x.flatten(0, 1).unsqueeze(2).repeat(1, 1, self.tubelet_size, 1, 1)

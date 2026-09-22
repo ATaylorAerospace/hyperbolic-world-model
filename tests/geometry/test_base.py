@@ -110,6 +110,13 @@ def test_sqdist_dist0_and_pairwise_are_consistent_with_dist(
         rtol=tol(dtype, 1e-4, 1e-10),
         atol=tol(dtype, 1e-5, 1e-12),
     )
+    # Row-chunked evaluation (memory bound) equals the single broadcast.
+    assert torch.allclose(m.pairwise_dist(x, y, chunk_rows=3), pd, atol=tol(dtype, 1e-5, 1e-12))
+    m.pairwise_budget, saved = 10, m.pairwise_budget
+    try:
+        assert torch.allclose(m.pairwise_dist(x, y), pd, atol=tol(dtype, 1e-5, 1e-12))
+    finally:
+        m.pairwise_budget = saved
 
 
 def test_origin_closed_forms_match_general_maps(m: Manifold, dtype: torch.dtype) -> None:

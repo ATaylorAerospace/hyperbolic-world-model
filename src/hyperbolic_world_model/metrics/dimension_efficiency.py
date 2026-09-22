@@ -13,6 +13,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+# numpy 2.0 renamed ``trapz`` to ``trapezoid`` and 2.4 removed the old name; support both pins.
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz  # noqa: NPY201
+
 
 @dataclass(frozen=True)
 class DimensionCurve:
@@ -73,7 +76,7 @@ def area_under_curve(curve: DimensionCurve, log_dims: bool = True) -> float:
     y = np.asarray(curve.values, dtype=float)
     if len(x) < 2:
         raise ValueError("need at least two dimensions to compute an area")
-    return float(np.trapezoid(y, x))
+    return float(_trapezoid(y, x))
 
 
 def dimension_to_reach(curve: DimensionCurve, threshold: float) -> int | None:

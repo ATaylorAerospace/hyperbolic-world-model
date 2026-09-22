@@ -21,6 +21,7 @@ training:
   weight_decay: 0.0
   grad_clip: 1.0
   save_head: true
+  cache_latents: true            # encode the dataset once with the frozen encoder, then train on cached latents
 
 hydra:
   run:

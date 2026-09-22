@@ -147,11 +147,19 @@ class ActionConditionedPredictor(nn.Module, ABC):
         if self.max_radius is None:
             return state
         m = self.manifold
-        d = m.dist0(state).unsqueeze(-1)
-        origin = m.origin(*state.shape, dtype=state.dtype, device=state.device)
-        t = (self.max_radius / d.clamp_min(1e-12)).clamp_max(1.0)
-        pulled = m.expmap(origin, t * m.logmap(origin, state))
-        return torch.where(d > self.max_radius, pulled, state)
+        d = m.dist0(state)
+        mask = d > self.max_radius
+        if not bool(mask.any()):  # common case: nothing to do, skip the exp/log maps entirely
+            return state
+        flat_state = state.reshape(-1, state.shape[-1])
+        idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
+        far = flat_state[idx]
+        origin = m.origin(*far.shape, dtype=far.dtype, device=far.device)
+        t = (self.max_radius / d.reshape(-1)[idx].clamp_min(1e-12)).clamp_max(1.0).unsqueeze(-1)
+        pulled = m.expmap(origin, t * m.logmap(origin, far))
+        out = flat_state.clone()
+        out[idx] = pulled
+        return out.reshape(state.shape)
 
     def coordinates(self, state: Tensor) -> Tensor:
         """Inverse of :meth:`lift` after ``logmap0``: coordinates whose norm is the geodesic distance from the origin."""
