@@ -7,7 +7,12 @@ import torch
 
 from hyperbolic_world_model.data.hierarchies import build_hierarchy
 from hyperbolic_world_model.geometry import Euclidean, PoincareBall
-from hyperbolic_world_model.metrics import average_distortion, mean_average_precision
+from hyperbolic_world_model.metrics import (
+    average_distortion,
+    expected_average_precision,
+    mean_average_precision,
+    pairwise_distances,
+)
 
 
 def _small_tree():
@@ -55,3 +60,49 @@ def test_shape_validation() -> None:
         average_distortion(torch.zeros(3, 2), torch.zeros(4, 4), m)
     with pytest.raises(ValueError):
         mean_average_precision(torch.zeros(3, 2), torch.zeros(3, 3, dtype=torch.bool), m)
+
+
+def test_expected_average_precision_is_textbook_without_ties_and_tie_invariant() -> None:
+    d = torch.tensor([0.1, 0.4, 0.2, 0.9, 0.3])
+    rel = torch.tensor([True, True, False, False, True])
+    # sorted distances 0.1 (rel), 0.2, 0.3 (rel), 0.4 (rel), 0.9: relevant ranks 1, 3, 4
+    assert expected_average_precision(d, rel) == pytest.approx((1 + 2 / 3 + 3 / 4) / 3)
+    # Two candidates tied at the nearest distance, one relevant: the expectation over the two
+    # tie orders is the mean of the optimistic (1.0) and pessimistic (0.5) precisions.
+    d = torch.tensor([0.5, 0.5, 0.9])
+    rel = torch.tensor([True, False, False])
+    assert expected_average_precision(d, rel) == pytest.approx(0.75)
+    assert expected_average_precision(d[[1, 0, 2]], rel[[1, 0, 2]]) == pytest.approx(0.75)
+    with pytest.raises(ValueError, match="no relevant"):
+        expected_average_precision(d, torch.zeros(3, dtype=torch.bool))
+
+
+def test_map_does_not_depend_on_tie_breaking() -> None:
+    """A single-child node shares its child's Fréchet mean: exact ties are structural."""
+    m = Euclidean()
+    emb = torch.tensor([[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [2.0, 1.0]], dtype=torch.float64)
+    adj = torch.zeros(4, 4, dtype=torch.bool)
+    for i, j in [(0, 1), (1, 2), (1, 3)]:
+        adj[i, j] = adj[j, i] = True
+    perm = [0, 2, 1, 3]
+    a = mean_average_precision(emb, adj, m)
+    b = mean_average_precision(emb[perm], adj[perm][:, perm], m)
+    assert a == pytest.approx(b)
+    assert 0.75 < a < 1.0  # between the pessimistic and optimistic tie orders
+
+
+def test_precomputed_pairwise_distances_give_identical_scores() -> None:
+    tree = _small_tree()
+    m = PoincareBall(-1.0)
+    emb = m.expmap0(torch.randn(tree.n_nodes, 3, dtype=torch.float64) * 0.4)
+    pw = pairwise_distances(emb, m)
+    assert pw.shape == (tree.n_nodes, tree.n_nodes) and pw.dtype == torch.float64
+    true, adj = tree.tree_distance_matrix(), tree.adjacency()
+    assert average_distortion(emb, true, m, pairwise=pw) == pytest.approx(
+        average_distortion(emb, true, m)
+    )
+    assert mean_average_precision(emb, adj, m, pairwise=pw) == pytest.approx(
+        mean_average_precision(emb, adj, m)
+    )
+    with pytest.raises(ValueError, match="embeddings must be"):
+        pairwise_distances(torch.zeros(3), m)

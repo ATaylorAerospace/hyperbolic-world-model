@@ -14,14 +14,17 @@ from geoopt.manifolds.stereographic.math import artanh as _geoopt_artanh
 from torch import Tensor
 
 # Distance from the Poincaré-ball boundary at which geoopt's ``project`` clips points, per dtype.
-# Mirrors ``geoopt.manifolds.stereographic.math._project`` so tests and ``check_point`` agree
-# with what ``proj`` actually does.
+# Mirrors ``geoopt.manifolds.stereographic.math._project`` exactly (4e-3 for float32, 1e-5 for
+# every other dtype) so tests and ``check_point`` agree with what ``proj`` actually does. In half
+# precision ``1 - 1e-5`` rounds to ``1``, so the clip is a no-op there: the hyperbolic geometries
+# need float32 or float64, and :func:`reliable_radius` refuses half-precision dtypes.
 BOUNDARY_EPS: dict[torch.dtype, float] = {
-    torch.float16: 4e-3,
-    torch.bfloat16: 4e-3,
+    torch.float16: 1e-5,
+    torch.bfloat16: 1e-5,
     torch.float32: 4e-3,
     torch.float64: 1e-5,
 }
+HALF_DTYPES: frozenset[torch.dtype] = frozenset({torch.float16, torch.bfloat16})
 
 # Smallest positive value we divide by, per dtype.
 MIN_NORM: dict[torch.dtype, float] = {
@@ -54,6 +57,11 @@ def reliable_radius(curvature: float, dtype: torch.dtype = torch.float32) -> flo
     """
     if curvature >= 0:
         return math.inf
+    if dtype in HALF_DTYPES:
+        raise ValueError(
+            f"{dtype} cannot represent the Poincaré boundary clip (1 - 1e-5 rounds to 1); "
+            "hyperbolic latents need float32 or float64"
+        )
     return (2.0 / math.sqrt(-curvature)) * math.atanh(1.0 - eps(dtype))
 
 
@@ -86,6 +94,7 @@ def clip_norm(x: Tensor, max_norm: float | Tensor, dim: int = -1) -> Tensor:
 
 __all__ = [
     "BOUNDARY_EPS",
+    "HALF_DTYPES",
     "MIN_NORM",
     "arcosh",
     "artanh",

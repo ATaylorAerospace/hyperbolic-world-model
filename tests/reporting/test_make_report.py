@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from hyperbolic_world_model.reporting.make_report import main, make_report
+from hyperbolic_world_model.reporting.make_report import HEADER, main, make_report
 from tests.reporting.helpers import write_outputs_tree
 
 EXPECTED_TABLES = {
@@ -59,13 +59,28 @@ def test_report_is_a_pure_function_of_outputs(tmp_path: Path) -> None:
     report = tmp_path / "report"
     first = _digest(make_report(outputs, report))
     stale = report / "tables" / "stale.md"
-    stale.write_text("left over from an earlier run")
-    (report / "figures" / "old.png").write_bytes(b"png")
+    stale.write_text(f"# Old table\n\n{HEADER}\n\n| a |\n")  # carries the report marker
+    (report / "figures" / "old__thing.png").write_bytes(b"png")  # generated naming
+    foreign_md = report / "tables" / "notes.md"
+    foreign_md.write_text("hand-written notes, no marker")
+    (report / "figures" / "photo.png").write_bytes(b"png")
     (report / "notes.txt").write_text("not ours")
     second = _digest(make_report(outputs, report))
     assert first == second
-    assert not stale.exists() and not (report / "figures" / "old.png").exists()
-    assert (report / "notes.txt").exists()  # only generated files are removed
+    assert not stale.exists() and not (report / "figures" / "old__thing.png").exists()
+    # Only files the report wrote are removed; anything else in the directory survives.
+    assert foreign_md.exists() and (report / "figures" / "photo.png").exists()
+    assert (report / "notes.txt").exists()
+
+
+def test_report_never_overwrites_a_foreign_readme(tmp_path: Path) -> None:
+    outputs = write_outputs_tree(tmp_path / "outputs")
+    report = tmp_path / "project"
+    report.mkdir()
+    (report / "README.md").write_text("# My project\n\nnot a report\n")
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        make_report(outputs, report)
+    assert (report / "README.md").read_text().startswith("# My project")
 
 
 def test_without_a_sweep_there_are_no_curvature_figures(tmp_path: Path) -> None:

@@ -25,7 +25,12 @@ from hyperbolic_world_model.metrics.dimension_efficiency import (
     dimension_to_reach,
     efficiency_table,
 )
-from hyperbolic_world_model.metrics.distortion import average_distortion, mean_average_precision
+from hyperbolic_world_model.metrics.distortion import (
+    average_distortion,
+    expected_average_precision,
+    mean_average_precision,
+    pairwise_distances,
+)
 from hyperbolic_world_model.metrics.geodesic_error import (
     geodesic_error,
     geodesic_error_per_horizon,
@@ -49,11 +54,13 @@ __all__ = [
     "dimension_curve",
     "dimension_to_reach",
     "efficiency_table",
+    "expected_average_precision",
     "geodesic_error",
     "geodesic_error_per_horizon",
     "mean_average_precision",
     "normalised_geodesic_error",
     "normalised_geodesic_error_per_horizon",
+    "pairwise_distances",
     "relative_delta_hyperbolicity",
     "static_baseline_error",
 ]

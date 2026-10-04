@@ -7,6 +7,7 @@ import torch
 
 from hyperbolic_world_model.geometry.utils import (
     BOUNDARY_EPS,
+    HALF_DTYPES,
     MIN_NORM,
     arcosh,
     artanh,
@@ -21,6 +22,11 @@ from hyperbolic_world_model.geometry.utils import (
 def test_eps_and_min_norm_tables() -> None:
     assert eps(torch.float32) == BOUNDARY_EPS[torch.float32] == 4e-3
     assert eps(torch.float64) == BOUNDARY_EPS[torch.float64] == 1e-5
+    # geoopt's _project uses 4e-3 for float32 and 1e-5 for every other dtype; in half precision
+    # 1 - 1e-5 rounds to 1, so the clip is a no-op and the table says so honestly.
+    for half in HALF_DTYPES:
+        assert eps(half) == 1e-5
+        assert float(torch.tensor(1.0 - eps(half), dtype=half)) == 1.0
     assert min_norm(torch.float32) == MIN_NORM[torch.float32] == 1e-7
     assert min_norm(torch.float64) == MIN_NORM[torch.float64] == 1e-15
     # Unknown dtypes fall back to the float32 entry rather than raising.
@@ -97,3 +103,9 @@ def test_reliable_radius_is_where_the_ball_clip_lands(c: float, dtype: torch.dty
     assert reliable_radius(c, torch.float32) < reliable_radius(c, torch.float64)
     assert reliable_radius(Euclidean().curvature, dtype) == float("inf")
     assert reliable_radius(-1.0, torch.float32) == pytest.approx(6.21, abs=0.01)
+
+
+@pytest.mark.parametrize("half", sorted(HALF_DTYPES, key=str))
+def test_reliable_radius_refuses_half_precision(half: torch.dtype) -> None:
+    with pytest.raises(ValueError, match="float32 or float64"):
+        reliable_radius(-1.0, half)

@@ -197,3 +197,18 @@ def test_synthetic_branches_share_a_start_frame_and_drive_the_task() -> None:
     # Unbranched data keeps the previous episode layout exactly.
     plain = SyntheticTrajectoryDataset(SyntheticSpec(n_episodes=12, horizon=4), split="val")
     assert plain.branch_pairs() == [] and plain.meta[5]["prompt_id"] == "p5"
+
+
+def test_each_window_is_encoded_once_per_chunk() -> None:
+    ds = BranchingDataset(n_prompts=2, n_branches=5, horizon=3)
+    bundle = tiny_bundle(perturb=0.2)
+    encoded = {"windows": 0}
+    original = bundle.encoder.encode
+
+    def counting(frames):
+        encoded["windows"] += frames.shape[0]
+        return original(frames)
+
+    bundle.encoder.encode = counting  # type: ignore[method-assign]
+    res = LongHorizonConsistencyTask(horizon=3, batch_size=100).run(bundle, ds)
+    assert res.metrics["n_pairs"] == 20 and encoded["windows"] == len(ds) == 10

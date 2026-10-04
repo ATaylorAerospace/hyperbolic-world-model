@@ -127,3 +127,38 @@ def test_smoke_runs_all_four_tasks_on_branched_synthetic_data(tmp_path: Path) ->
     )  # 64 / 2 prompts
     for name in names:
         assert (tmp_path / f"{name}_curves.csv").exists()
+
+
+def test_each_run_saves_its_own_head_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sweep runs share experiment_name; the output_dir leaf keeps their checkpoints apart."""
+    monkeypatch.setenv("CKPT_ROOT", str(tmp_path / "ckpt"))
+    paths = []
+    for seed in (0, 1):
+        out_dir = tmp_path / f"run_seed{seed}"  # stands in for geometry=...,K=...,dim=...,seed=...
+        cfg = _compose(out_dir, f"seed={seed}", "training.epochs=1", "training.save_head=true")
+        run(cfg)
+        payload = json.loads((out_dir / "metrics.json").read_text())
+        paths.append(Path(payload["head_checkpoint"]))
+    assert paths[0] != paths[1] and all(p.exists() for p in paths)
+    assert {p.parent.name for p in paths} == {"run_seed0", "run_seed1"}
+    assert paths[0].parent.parent.name == "smoke"  # checkpoints/predictors/<experiment>/<run>/
+    assert set(torch.load(paths[0])) == set(torch.load(paths[1]))
+
+
+def test_config_dir_resolves_from_a_checkout_or_the_wheel(tmp_path: Path) -> None:
+    from hyperbolic_world_model.training.train_predictor import CONFIG_DIR, resolve_config_dir
+
+    assert (Path(CONFIG_DIR) / "config.yaml").exists()
+    # Installed layout: <site-packages>/hyperbolic_world_model/{training/train_predictor.py, configs/}
+    pkg = tmp_path / "site" / "hyperbolic_world_model"
+    (pkg / "training").mkdir(parents=True)
+    (pkg / "configs").mkdir()
+    (pkg / "configs" / "config.yaml").write_text("defaults: []\n")
+    module = pkg / "training" / "train_predictor.py"
+    module.write_text("")
+    assert resolve_config_dir(module) == str(pkg / "configs")
+    (pkg / "configs" / "config.yaml").unlink()
+    with pytest.raises(FileNotFoundError, match="no Hydra config directory"):
+        resolve_config_dir(module)

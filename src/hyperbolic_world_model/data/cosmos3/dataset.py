@@ -50,7 +50,8 @@ class Cosmos3TrajectoryDataset(Dataset):
 
     Args:
         root: generated data root containing ``manifest.jsonl``.
-        horizon: predicted steps per window (``horizon + 1`` frames). ``None`` uses whole rollouts.
+        horizon: predicted steps per window (``horizon + 1`` frames). ``None`` uses whole
+            rollouts truncated to the shortest one (one window each), so items still stack.
         stride: window stride in frames.
         image_size: output ``(H, W)`` or a single int; ``None`` keeps the stored resolution.
         split: ``"train"``, ``"val"``, ``"test"`` or ``"all"``; rollouts are assigned to splits by a
@@ -85,13 +86,20 @@ class Cosmos3TrajectoryDataset(Dataset):
         self._cache: dict[int, tuple[Tensor, Tensor]] = {}
 
         keep = self._split_indices(split, split_fractions)
+        if horizon is None:
+            # Whole rollouts, truncated to the shortest one so every item (and batch) stacks.
+            lengths = [int(self.records[i]["num_frames"]) for i in keep]
+            self.effective_horizon = (min(lengths) - 1) if lengths else 0
+        else:
+            self.effective_horizon = int(horizon)
+        h = self.effective_horizon
         self.windows: list[Window] = []
         for i in keep:
             n = int(self.records[i]["num_frames"])
-            h = n - 1 if horizon is None else horizon
             if n < h + 1:
                 continue  # rollout too short for this horizon
-            for start in range(0, n - h, self.stride):
+            starts = [0] if horizon is None else range(0, n - h, self.stride)
+            for start in starts:
                 self.windows.append(Window(i, start))
         self.action_dim = int(self.records[0]["action_dim"])
 
@@ -181,7 +189,7 @@ class Cosmos3TrajectoryDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, Any]:
         w = self.windows[idx]
         frames, actions = self._load_rollout(w.rollout)
-        h = (frames.shape[0] - 1) if self.horizon is None else self.horizon
+        h = self.effective_horizon
         rec = self.records[w.rollout]
         meta = {
             "prompt_id": str(rec["prompt_id"]),

@@ -2,7 +2,7 @@
 # Written by src/hyperbolic_world_model/data/cosmos3/generate.py; read via manifest.jsonl.
 name: cosmos3_generated
 root: ${oc.env:DATA_ROOT,data}/cosmos3_generated
-horizon: 32                          # predicted steps per window; null = whole rollouts
+horizon: 32                          # predicted steps per window; null = whole rollouts truncated to the shortest
 stride: 4                            # window stride in frames
 image_size: 256                      # frames are resized (bilinear) to this on load
 split_fractions: [0.8, 0.1]          # train / val by prompt_id hash; the rest is test

@@ -15,6 +15,8 @@ Reference: Chami et al. (2020), "From Trees to Continuous Embeddings and Back", 
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 import torch
 from torch import Tensor
@@ -71,6 +73,23 @@ def delta_hyperbolicity_from_distances(dist: Tensor, base: int | None = None) ->
     return float(delta.clamp_min(0.0))
 
 
+def _subsampled_distance_matrices(
+    points: Tensor, manifold: Manifold, n_samples: int, n_trials: int, seed: int
+) -> Iterator[Tensor]:
+    """Yield the pairwise distance matrix of ``n_trials`` random subsamples of ``points``."""
+    if points.ndim != 2:
+        raise ValueError("points must be (N, d)")
+    if n_samples < 2 or n_trials < 1:
+        raise ValueError("n_samples must be >= 2 and n_trials >= 1")
+    rng = np.random.default_rng(seed)
+    n = points.shape[0]
+    for _ in range(n_trials):
+        idx = rng.choice(n, size=min(n_samples, n), replace=False)
+        sub = points[torch.as_tensor(idx, device=points.device)]
+        with torch.no_grad():
+            yield manifold.pairwise_dist(sub)
+
+
 def delta_hyperbolicity(
     points: Tensor,
     manifold: Manifold,
@@ -91,17 +110,10 @@ def delta_hyperbolicity(
     Returns:
         ``(mean_delta, std_delta)`` across trials.
     """
-    if points.ndim != 2:
-        raise ValueError("points must be (N, d)")
-    rng = np.random.default_rng(seed)
-    n = points.shape[0]
-    deltas = []
-    for _ in range(n_trials):
-        idx = rng.choice(n, size=min(n_samples, n), replace=False)
-        sub = points[torch.as_tensor(idx, device=points.device)]
-        with torch.no_grad():
-            dist = manifold.pairwise_dist(sub)
-        deltas.append(delta_hyperbolicity_from_distances(dist))
+    deltas = [
+        delta_hyperbolicity_from_distances(dist)
+        for dist in _subsampled_distance_matrices(points, manifold, n_samples, n_trials, seed)
+    ]
     arr = np.asarray(deltas)
     return float(arr.mean()), float(arr.std())
 
@@ -115,21 +127,13 @@ def relative_delta_hyperbolicity(
 ) -> tuple[float, float]:
     """Diameter-normalised delta ``2 * delta / diam`` in ``[0, 1]``, comparable across scales.
 
-    Values near ``0`` indicate tree-like structure; ``1`` is maximally non-hyperbolic.
+    Values near ``0`` indicate tree-like structure; ``1`` is maximally non-hyperbolic. Uses the
+    same subsamples as :func:`delta_hyperbolicity` for the same ``seed``.
     """
-    rng = np.random.default_rng(seed)
-    n = points.shape[0]
     vals = []
-    for _ in range(n_trials):
-        idx = rng.choice(n, size=min(n_samples, n), replace=False)
-        sub = points[torch.as_tensor(idx, device=points.device)]
-        with torch.no_grad():
-            dist = manifold.pairwise_dist(sub)
+    for dist in _subsampled_distance_matrices(points, manifold, n_samples, n_trials, seed):
         diam = float(dist.max())
-        if diam <= 0:
-            vals.append(0.0)
-            continue
-        vals.append(2.0 * delta_hyperbolicity_from_distances(dist) / diam)
+        vals.append(0.0 if diam <= 0 else 2.0 * delta_hyperbolicity_from_distances(dist) / diam)
     arr = np.asarray(vals)
     return float(arr.mean()), float(arr.std())
 
