@@ -104,3 +104,24 @@ def test_subsampled_estimator_on_point_clouds() -> None:
     line = torch.stack([torch.linspace(0, 10, 50), torch.zeros(50)], dim=1)
     mean_line, _ = delta_hyperbolicity(line, m, n_samples=50, n_trials=2)
     assert mean_line < 1e-6
+
+
+def test_estimators_share_validation_and_subsamples() -> None:
+    import pytest
+
+    m = Euclidean()
+    for fn in (delta_hyperbolicity, relative_delta_hyperbolicity):
+        with pytest.raises(ValueError, match="points must be"):
+            fn(torch.zeros(5), m)
+        with pytest.raises(ValueError, match="n_samples"):
+            fn(torch.zeros(5, 2), m, n_samples=1)
+    pts = torch.randn(40, 3, dtype=torch.float64)
+    (d, _), (r, _) = (
+        delta_hyperbolicity(pts, m, n_samples=20, n_trials=1, seed=3),
+        relative_delta_hyperbolicity(pts, m, n_samples=20, n_trials=1, seed=3),
+    )
+    # Same seed -> same subsample, so the relative value is exactly 2 * delta / diameter.
+    rng = __import__("numpy").random.default_rng(3)
+    sub = pts[torch.as_tensor(rng.choice(40, size=20, replace=False))]
+    diam = float(torch.cdist(sub, sub).max())
+    assert r == pytest.approx(2 * d / diam)

@@ -28,7 +28,6 @@ last horizon.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 import pandas as pd
 import torch
@@ -95,23 +94,22 @@ class LongHorizonConsistencyTask(Task):
         self.saturation_fraction = float(saturation_fraction)
         self.start_atol = float(start_atol)
 
-    def _stack_pairs(
+    def _load_chunk(
         self, dataset: Dataset, pairs: list[tuple[int, int]]
-    ) -> tuple[dict[str, Tensor], dict[str, Tensor], int]:
-        """Load a batch of pairs, truncated to the shortest branch and ``self.horizon``."""
-        items_a = [dataset[a] for a, _ in pairs]
-        items_b = [dataset[b] for _, b in pairs]
-        h = min(self.horizon, *(int(it["actions"].shape[0]) for it in items_a + items_b))
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, int]:
+        """Load the distinct windows of a chunk of pairs once; return stacked frames, actions, and
+        the index of each pair's two windows into them, plus the common horizon."""
+        unique = sorted({i for pair in pairs for i in pair})
+        items = {i: dataset[i] for i in unique}
+        h = min(self.horizon, *(int(it["actions"].shape[0]) for it in items.values()))
         if h < 1:
             raise ValueError("branches must have at least one action")
-
-        def stack(items: list[dict[str, Any]]) -> dict[str, Tensor]:
-            return {
-                "frames": torch.stack([it["frames"][: h + 1] for it in items]),
-                "actions": torch.stack([it["actions"][:h] for it in items]),
-            }
-
-        return stack(items_a), stack(items_b), h
+        frames = torch.stack([items[i]["frames"][: h + 1] for i in unique])
+        actions = torch.stack([items[i]["actions"][:h] for i in unique])
+        pos = {i: k for k, i in enumerate(unique)}
+        ia = torch.tensor([pos[a] for a, _ in pairs])
+        ib = torch.tensor([pos[b] for _, b in pairs])
+        return frames, actions, ia, ib, h
 
     @torch.no_grad()
     def run(self, bundle: ModelBundle, dataset: Dataset, device: str = "cpu") -> TaskResult:
@@ -126,18 +124,25 @@ class LongHorizonConsistencyTask(Task):
             k: [[] for _ in range(self.horizon)] for k in DIVERGENCES
         }
         for start in range(0, len(pairs), self.batch_size):
-            a, b, h = self._stack_pairs(dataset, pairs[start : start + self.batch_size])
-            fa, fb = a["frames"].to(device), b["frames"].to(device)
+            chunk = pairs[start : start + self.batch_size]
+            frames, actions, ia, ib, h = self._load_chunk(dataset, chunk)
+            frames, actions = frames.to(device), actions.to(device)
+            ia, ib = ia.to(device), ib.to(device)
+            # Every distinct window is encoded, embedded and rolled out exactly once per chunk;
+            # a window shared by several pairs (n - 1 pairs for n branches) is only indexed.
+            enc = bundle.encoder.encode(frames)  # (U, h+1, D)
+            z = head.embed(enc)  # (U, h+1, d) on the manifold
+            roll = head.rollout(z[:, 0], actions)  # (U, h, d)
+            fa, fb = frames[ia], frames[ib]
             gap = float((fa[:, 0] - fb[:, 0]).abs().max())
             if gap > self.start_atol:
                 raise ValueError(
                     f"paired branches must share their start frame (max pixel gap {gap:.4f} > "
                     f"start_atol {self.start_atol:.4f})"
                 )
-            enc_a, enc_b = bundle.encoder.encode(fa), bundle.encoder.encode(fb)  # (B, h+1, D)
-            z_a, z_b = head.embed(enc_a), head.embed(enc_b)  # (B, h+1, d) on the manifold
-            roll_a = head.rollout(z_a[:, 0], a["actions"].to(device))  # (B, h, d)
-            roll_b = head.rollout(z_b[:, 0], b["actions"].to(device))
+            enc_a, enc_b = enc[ia], enc[ib]
+            z_a, z_b = z[ia], z[ib]
+            roll_a, roll_b = roll[ia], roll[ib]
             div = {
                 "latent_divergence": geodesic_error(m, roll_a, roll_b),
                 "embedded_divergence": geodesic_error(m, z_a[:, 1:], z_b[:, 1:]),

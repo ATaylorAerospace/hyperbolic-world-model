@@ -41,7 +41,27 @@ from hyperbolic_world_model.tasks.compositional_generalization import (
 from hyperbolic_world_model.training.riemannian_optim import build_optimizer
 
 log = logging.getLogger(__name__)
-CONFIG_DIR = str(Path(__file__).resolve().parents[3] / "configs")
+
+
+def resolve_config_dir(module_file: str | os.PathLike[str] = __file__) -> str:
+    """Hydra config directory: the source checkout's ``configs/`` or the copy shipped in the wheel.
+
+    The wheel force-includes ``configs/`` as ``hyperbolic_world_model/configs`` so the
+    ``hwm-train`` console script works from a non-editable install, not only from a checkout.
+    """
+    here = Path(module_file).resolve()
+    candidates = [here.parents[3] / "configs", here.parents[1] / "configs"]
+    for cand in candidates:
+        if (cand / "config.yaml").exists():
+            return str(cand)
+    raise FileNotFoundError(
+        "no Hydra config directory found; looked in "
+        + ", ".join(str(c) for c in candidates)
+        + " (a source checkout keeps configs/ at the repository root; the wheel ships a copy)"
+    )
+
+
+CONFIG_DIR = resolve_config_dir()
 
 
 def set_seed(seed: int) -> None:
@@ -184,11 +204,19 @@ def write_outputs(
             r.curves.to_csv(out_dir / f"{r.task}_curves.csv", index=False)
     if cfg.training.save_head:
         bundle.encoder.assert_frozen()
-        ckpt_root = (
-            Path(os.environ.get("CKPT_ROOT") or "checkpoints") / "predictors" / cfg.experiment_name
+        # One file per run: the sweep's 90 runs share experiment_name, so the output_dir leaf
+        # (geometry=...,K=...,dim=...,seed=...) keeps them from overwriting each other.
+        ckpt_dir = (
+            Path(os.environ.get("CKPT_ROOT") or "checkpoints")
+            / "predictors"
+            / cfg.experiment_name
+            / Path(cfg.output_dir).name
         )
-        ckpt_root.mkdir(parents=True, exist_ok=True)
-        torch.save(bundle.predictor.state_dict(), ckpt_root / "head.pt")
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_path = ckpt_dir / "head.pt"
+        torch.save(bundle.predictor.state_dict(), ckpt_path)
+        payload["head_checkpoint"] = str(ckpt_path)
+        (out_dir / "metrics.json").write_text(json.dumps(payload, indent=2))
 
 
 def run(cfg: DictConfig) -> dict[str, Any]:

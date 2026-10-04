@@ -18,6 +18,7 @@ Shared helpers:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -31,6 +32,10 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from hyperbolic_world_model.data.synthetic import collate
 from hyperbolic_world_model.geometry.base import Manifold
 from hyperbolic_world_model.models.registry import ModelBundle
+
+log = logging.getLogger(__name__)
+#: Armijo constant of the Fréchet-mean line search (fraction of the first-order decrease).
+ARMIJO = 0.5
 
 
 @dataclass
@@ -150,7 +155,7 @@ def frechet_mean(
     points: Tensor,
     dim: int = -2,
     n_iter: int = 100,
-    tol: float = 1e-7,
+    tol: float = 1e-5,
     weights: Tensor | None = None,
     max_backtracks: int = 20,
 ) -> Tensor:
@@ -158,12 +163,15 @@ def frechet_mean(
 
     Minimises ``f(x) = sum_i w_i d(x, p_i)^2`` by Riemannian gradient descent: starting from the
     exponential map of the tangent-space mean at the origin, each iteration proposes the classic
-    update ``x <- exp_x(sum_i w_i log_x(p_i))`` and halves the step until ``f`` does not increase
-    (a backtracking line search). The safeguard matters in hyperbolic space: for points more than
-    about two units from the current iterate the Hessian of ``d^2`` exceeds two, so the unit step
-    of the plain fixed-point iteration overshoots and diverges. ``f`` is geodesically convex on
-    every geometry here, so the descent converges to the unique mean. On the Euclidean manifold
-    the first unit step lands on the arithmetic mean exactly.
+    update ``x <- exp_x(sum_i w_i log_x(p_i))`` and halves the step until the Armijo sufficient
+    decrease condition holds (``f`` must fall by at least a quarter of the first-order
+    prediction). Both safeguards matter in hyperbolic space: for points more than about two units
+    from the current iterate the Hessian of ``d^2`` exceeds two, so the unit step overshoots, and
+    a step that merely does not increase ``f`` can land mirror-symmetric across the minimiser and
+    bounce forever. ``f`` is geodesically convex on every geometry here, so the descent converges
+    to the unique mean; the loop stops when the Riemannian gradient is shorter than ``tol`` and
+    warns if ``n_iter`` runs out first. On the Euclidean manifold the first unit step lands on
+    the arithmetic mean exactly.
 
     Tasks use this to pool latents over time and over trajectories: a coordinate average would
     leave the hyperboloid and pull ball points towards the origin.
@@ -174,7 +182,8 @@ def frechet_mean(
             the last is allowed).
         dim: axis to reduce.
         n_iter: maximum number of descent iterations.
-        tol: stop when every mean moved by less than ``tol`` (geodesic units).
+        tol: stop when every residual Riemannian gradient is shorter than ``tol`` (geodesic
+            units); a warning is logged if ``n_iter`` is exhausted first.
         weights: optional non-negative weights broadcastable to ``points.shape[:-1]``; ``None``
             is uniform.
         max_backtracks: maximum step halvings per iteration.
@@ -200,26 +209,41 @@ def frechet_mean(
 
     x = manifold.proj(manifold.expmap0((w.unsqueeze(-1) * manifold.logmap0(points)).sum(dim=dim)))
     f = objective(x)
-    slack = 16 * torch.finfo(points.dtype).eps
+    gnorm = torch.zeros_like(f)
     for _ in range(n_iter):
         u = (w.unsqueeze(-1) * manifold.logmap(x.unsqueeze(dim), points)).sum(dim=dim)
         u = manifold.proj_tan(x, u)
+        # |u|_x in the Riemannian metric is the geodesic length of exp_x(u); grad f = -2u, so the
+        # directional derivative of f along u is -2 |u|_x^2.
+        gnorm = manifold.dist(x, manifold.proj(manifold.expmap(x, u)))
+        if float(gnorm.max()) < tol:
+            break
         t = torch.ones_like(f)
         accepted = torch.zeros_like(f, dtype=torch.bool)
         x_try, f_try = x, f
         for _ in range(max_backtracks):
             x_try = manifold.proj(manifold.expmap(x, t.unsqueeze(-1) * u))
             f_try = objective(x_try)
-            accepted = f_try <= f * (1 + slack) + slack
+            # Armijo sufficient decrease (c = 1/4 of the first-order prediction 2 t |u|^2): a
+            # step that merely does not increase f, such as a unit step landing mirror-symmetric
+            # across the minimiser, is rejected instead of starting a period-2 bounce.
+            accepted = f_try <= f - ARMIJO * t * gnorm**2
             if bool(accepted.all()):
                 break
             t = torch.where(accepted, t, t / 2)
+        if not bool(accepted.any()):
+            break  # every element is at the numerical floor: no step can still decrease f
         keep = accepted.unsqueeze(-1)
-        x_new = torch.where(keep, x_try, x)
-        step = manifold.dist(x, x_new).max()
-        x, f = x_new, torch.where(accepted, f_try, f)
-        if float(step) < tol:
-            break
+        x = torch.where(keep, x_try, x)
+        f = torch.where(accepted, f_try, f)
+    else:
+        log.warning(
+            "frechet_mean did not converge in %d iterations: largest residual gradient %.2e "
+            "(tol %.0e); increase n_iter or check the points",
+            n_iter,
+            float(gnorm.max()),
+            tol,
+        )
     return x
 
 

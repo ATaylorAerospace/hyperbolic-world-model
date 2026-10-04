@@ -142,6 +142,12 @@ def load_action_spec(actions_json: Path, start_frames_dir: Path) -> list[Prompt]
                     f"prompt {pid} branch {bid}: actions must be (T-1 >= 1, {action_dim}), got {actions.shape}"
                 )
             extra = {k: v for k, v in b.items() if k not in {"branch_id", "actions", "primitive"}}
+            reserved = sorted(set(extra) & MANIFEST_FIELDS)
+            if reserved:
+                raise ValueError(
+                    f"prompt {pid} branch {bid}: keys {reserved} are written by the generator and "
+                    "cannot be set in the action spec"
+                )
             branches.append(Branch(bid, actions, str(b["primitive"]), extra))
         if not branches:
             raise ValueError(f"prompt {pid}: no branches")
@@ -384,6 +390,13 @@ class Cosmos3Generator:
                 action_path.write_text(json.dumps(chunk.tolist()))
                 samples.append(self.make_sample(name, image_path, action_path, j.seed + level, j.text))
                 active.append((j.key, name))
+            names = [name for _, name in active]
+            if len(set(names)) != len(names):
+                dupes = sorted({n for n in names if names.count(n) > 1})
+                raise ValueError(
+                    f"rollout keys collide after sanitising to framework sample names: {dupes}; "
+                    "use prompt/branch ids that differ in letters, digits, '-' or '_'"
+                )
             outputs = self._runner(samples, level_dir)
             for key, name in active:
                 frames = outputs[name]
@@ -400,6 +413,30 @@ class Cosmos3Generator:
 
     def generate(self, start_frame: np.ndarray, actions: np.ndarray, seed: int) -> np.ndarray:
         return self.generate_batch([RolloutJob("single", start_frame, actions, seed)])["single"]
+
+
+#: Record fields written by :func:`write_rollout`; an action spec may not set them.
+MANIFEST_FIELDS: frozenset[str] = frozenset(
+    {
+        "prompt_id",
+        "branch_id",
+        "embodiment",
+        "task",
+        "primitive",
+        "frames_path",
+        "mp4_path",
+        "latents_path",
+        "num_frames",
+        "height",
+        "width",
+        "action_dim",
+        "seed",
+        "start_frame",
+        "model_info",
+        "generated_at",
+        "host",
+    }
+)
 
 
 def _safe(key: str) -> str:
@@ -445,8 +482,9 @@ def write_rollout(
         "model_info": model_info,
         "generated_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "host": platform.node(),
-        **branch.extra,
     }
+    for key, value in branch.extra.items():  # provenance fields always win over spec extras
+        record.setdefault(key, value)
     (d / "meta.json").write_text(json.dumps(record, indent=2))
     return record
 
@@ -466,6 +504,15 @@ def append_manifest(out_root: Path, records: Iterable[dict[str, Any]]) -> Path:
         for r in records:
             f.write(json.dumps(r) + "\n")
     return path
+
+
+def _drop_from_manifest(out_root: Path, keys: set[tuple[str, str]]) -> None:
+    """Rewrite ``manifest.jsonl`` without the records whose ``(prompt_id, branch_id)`` is in ``keys``."""
+    path = Path(out_root) / "manifest.jsonl"
+    if not path.exists():
+        return
+    kept = [r for r in read_manifest(out_root) if (r["prompt_id"], r["branch_id"]) not in keys]
+    path.write_text("".join(json.dumps(r) + "\n" for r in kept))
 
 
 def read_manifest(out_root: Path) -> list[dict[str, Any]]:
@@ -507,6 +554,8 @@ def generate_rollouts(
             todo.append((prompt, branch, RolloutJob(f"{prompt.prompt_id}/{branch.branch_id}", start, branch.actions, s, prompt.text)))
     if not todo:
         return []
+    if not skip_existing:  # regenerated rollouts replace their manifest records, never duplicate
+        _drop_from_manifest(out_root, {(p.prompt_id, b.branch_id) for p, b, _ in todo})
     batch = getattr(generator, "generate_batch", None)
     if callable(batch):  # Cosmos 3: every rollout's chunk level shares one model invocation
         videos = batch([job for _, _, job in todo])
@@ -613,6 +662,7 @@ __all__ = [
     "Cosmos3Generator",
     "Prompt",
     "RolloutJob",
+    "MANIFEST_FIELDS",
     "append_manifest",
     "branch_seed",
     "generate_rollouts",

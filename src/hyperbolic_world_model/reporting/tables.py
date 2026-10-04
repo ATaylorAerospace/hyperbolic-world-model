@@ -211,37 +211,36 @@ def best_curvature_table(summary: pd.DataFrame, task: str, metric: str) -> pd.Da
 
 def _best_row(at_d: pd.DataFrame, model: str, task: str, metric: str, d: int, lower: bool) -> dict:
     """One row of :func:`best_curvature_table` for a single model and dimension."""
-    if True:
-        euc = at_d[at_d["geometry"] == "euclidean"]
-        hyp = at_d[at_d["geometry"] != "euclidean"]
-        row: dict = {"model": model, "task": task, "metric": metric, "latent_dim": d}
-        n_seeds = math.inf
-        if not euc.empty:
-            row["euclidean_mean"] = float(euc["mean"].mean())
-            row["euclidean_std"] = float(euc["std"].mean())
-            n_seeds = min(n_seeds, int(euc["n_seeds"].min()))
-        else:
-            row["euclidean_mean"] = row["euclidean_std"] = math.nan
-        if not hyp.empty:
-            best = hyp.sort_values(["mean", "geometry", "curvature"], kind="stable")
-            best = best.iloc[0] if lower else best.iloc[-1]
-            row["best_geometry"] = best["geometry"]
-            row["best_curvature"] = float(best["curvature"])
-            row["best_mean"], row["best_std"] = float(best["mean"]), float(best["std"])
-            n_seeds = min(n_seeds, int(best["n_seeds"]))
-        else:
-            row["best_geometry"] = ""
-            row["best_curvature"] = row["best_mean"] = row["best_std"] = math.nan
-        row["n_seeds"] = math.nan if math.isinf(n_seeds) else float(n_seeds)
-        if not euc.empty and not hyp.empty:
-            gain = row["euclidean_mean"] - row["best_mean"]
-            row["improvement"] = gain if lower else -gain
-            row["exceeds_one_std"] = bool(
-                n_seeds >= 2 and row["improvement"] > max(row["euclidean_std"], row["best_std"])
-            )
-        else:
-            row["improvement"], row["exceeds_one_std"] = math.nan, False
-        return row
+    euc = at_d[at_d["geometry"] == "euclidean"]
+    hyp = at_d[at_d["geometry"] != "euclidean"]
+    row: dict = {"model": model, "task": task, "metric": metric, "latent_dim": d}
+    n_seeds = math.inf
+    if not euc.empty:
+        row["euclidean_mean"] = float(euc["mean"].mean())
+        row["euclidean_std"] = float(euc["std"].mean())
+        n_seeds = min(n_seeds, int(euc["n_seeds"].min()))
+    else:
+        row["euclidean_mean"] = row["euclidean_std"] = math.nan
+    if not hyp.empty:
+        best = hyp.sort_values(["mean", "geometry", "curvature"], kind="stable")
+        best = best.iloc[0] if lower else best.iloc[-1]
+        row["best_geometry"] = best["geometry"]
+        row["best_curvature"] = float(best["curvature"])
+        row["best_mean"], row["best_std"] = float(best["mean"]), float(best["std"])
+        n_seeds = min(n_seeds, int(best["n_seeds"]))
+    else:
+        row["best_geometry"] = ""
+        row["best_curvature"] = row["best_mean"] = row["best_std"] = math.nan
+    row["n_seeds"] = math.nan if math.isinf(n_seeds) else float(n_seeds)
+    if not euc.empty and not hyp.empty:
+        gain = row["euclidean_mean"] - row["best_mean"]
+        row["improvement"] = gain if lower else -gain
+        row["exceeds_one_std"] = bool(
+            n_seeds >= 2 and row["improvement"] > max(row["euclidean_std"], row["best_std"])
+        )
+    else:
+        row["improvement"], row["exceeds_one_std"] = math.nan, False
+    return row
 
 
 def dimension_efficiency_table(summary: pd.DataFrame, task: str, metric: str) -> pd.DataFrame:

@@ -37,7 +37,11 @@ from hyperbolic_world_model.data.hierarchies import (
     leaf_index_for_metadata,
 )
 from hyperbolic_world_model.geometry.base import Manifold
-from hyperbolic_world_model.metrics.distortion import average_distortion, mean_average_precision
+from hyperbolic_world_model.metrics.distortion import (
+    average_distortion,
+    mean_average_precision,
+    pairwise_distances,
+)
 from hyperbolic_world_model.models.registry import ModelBundle
 from hyperbolic_world_model.tasks.base import Task, TaskResult, frechet_mean, spearman
 
@@ -83,12 +87,18 @@ def node_embeddings(
 def score_tree_embedding(
     manifold: Manifold, tree: Hierarchy, emb: Tensor, tree_dist: Tensor, adjacency: Tensor
 ) -> dict[str, float]:
-    """Distortion, mAP and Spearman(depth, dist0) of a node embedding, in ``manifold``."""
+    """Distortion, mAP and Spearman(depth, dist0) of a node embedding, in ``manifold``.
+
+    The ``(n, n)`` distance matrix is computed once and shared by both metrics.
+    """
     with torch.no_grad():
         radius = manifold.dist0(emb)
+        pairwise = pairwise_distances(emb, manifold)
     return {
-        "average_distortion": average_distortion(emb, tree_dist.to(emb.device), manifold),
-        "map": mean_average_precision(emb, adjacency.to(emb.device), manifold),
+        "average_distortion": average_distortion(
+            emb, tree_dist.to(emb.device), manifold, pairwise=pairwise
+        ),
+        "map": mean_average_precision(emb, adjacency.to(emb.device), manifold, pairwise=pairwise),
         "depth_spearman": spearman(torch.tensor(tree.depth, dtype=torch.float64), radius),
     }
 

@@ -187,3 +187,32 @@ def test_spearman() -> None:
     assert math.isnan(spearman([1.0], [2.0]))
     with pytest.raises(ValueError, match="same length"):
         spearman([1, 2], [1, 2, 3])
+
+
+@pytest.mark.parametrize("m", [PoincareBall(c=-1.0), Lorentz(c=-1.0)])
+def test_frechet_mean_converges_where_the_unit_step_bounces(
+    m: Manifold, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Groups of points ~2 units out: a plain 'does not increase f' line search accepted unit
+    steps that bounced across the minimiser and returned unconverged means."""
+    torch.manual_seed(0)
+    v = torch.randn(64, 8, 3, dtype=torch.float64)
+    v = v / v.norm(dim=-1, keepdim=True) * (2.0 + 0.5 * torch.rand(64, 8, 1, dtype=torch.float64))
+    pts = m.expmap0(m.tangent0_from_euclidean(v / m.lambda0))
+    with caplog.at_level("WARNING"):
+        mu = frechet_mean(m, pts, dim=1)
+    assert "did not converge" not in caplog.text
+    # Stationary everywhere: the residual Riemannian gradient is below the tolerance.
+    u = m.logmap(mu.unsqueeze(1), pts).mean(1)
+    assert float(m.dist(mu, m.expmap(mu, u)).max()) < 1e-5
+    # And at least as good as a slow, heavily damped reference descent.
+    x = m.expmap0(m.logmap0(pts).mean(1))
+    for _ in range(3000):
+        x = m.proj(m.expmap(x, 0.2 * m.logmap(x.unsqueeze(1), pts).mean(1)))
+    sq = lambda y: (m.dist(y.unsqueeze(1), pts) ** 2).sum(1)  # noqa: E731
+    assert torch.all(sq(mu) <= sq(x) + 1e-9)
+    assert float(m.dist(mu, x).max()) < 1e-4
+    # An exhausted budget is reported, never silent.
+    with caplog.at_level("WARNING"):
+        frechet_mean(m, pts, dim=1, n_iter=1)
+    assert "did not converge" in caplog.text

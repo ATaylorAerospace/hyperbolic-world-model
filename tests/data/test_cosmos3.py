@@ -153,6 +153,11 @@ def test_generate_rollouts_writes_frames_meta_and_manifest(prompt_dir: tuple[Pat
     assert g.generate_rollouts(prompts, FakeGenerator(), out, seed=0, write_mp4=False) == []
     again = g.generate_rollouts(prompts, FakeGenerator(), out, seed=0, write_mp4=False, skip_existing=False)
     assert len(again) == 8
+    # Regenerated rollouts replace their manifest records instead of being appended twice.
+    assert len(g.read_manifest(out)) == 8
+    assert sorted((r["prompt_id"], r["branch_id"]) for r in g.read_manifest(out)) == sorted(
+        (r["prompt_id"], r["branch_id"]) for r in manifest
+    )
     with np.load(out / again[3]["frames_path"]) as z:
         with np.load(out / manifest[3]["frames_path"]) as z_old:
             assert np.array_equal(z["frames"], z_old["frames"])  # same seed -> same rollout
@@ -381,7 +386,13 @@ def test_dataset_windows_shapes_and_meta(generated: Path) -> None:
     assert item["meta"]["prompt_id"] == "ep0" and item["meta"]["branch_id"] == "b0" and item["meta"]["start"] == 0
     assert item["meta"]["latents_path"].endswith("ep0/b0.npz")
     whole = Cosmos3TrajectoryDataset(generated, horizon=None)
-    assert len(whole) == 8 and whole[1]["frames"].shape == (10, 3, H, W)
+    # Whole rollouts are truncated to the shortest (7 frames) so every item and batch stacks.
+    assert len(whole) == 8 and whole.effective_horizon == 6
+    assert whole[1]["frames"].shape == (7, 3, H, W) and whole[1]["actions"].shape == (6, A)
+    from hyperbolic_world_model.data.synthetic import collate
+
+    batch = collate([whole[i] for i in range(len(whole))])
+    assert batch["frames"].shape == (8, 7, 3, H, W) and batch["actions"].shape == (8, 6, A)
     too_long = Cosmos3TrajectoryDataset(generated, horizon=8)
     assert len(too_long) == 4 * 2  # only the 10-frame branches fit
     with pytest.raises(FileNotFoundError):
@@ -427,3 +438,32 @@ def test_dataset_splits_and_config(generated: Path) -> None:
     assert isinstance(ds, Cosmos3TrajectoryDataset) and ds[0]["frames"].shape[-1] == 8
     ds2 = Cosmos3TrajectoryDataset.from_config({"root": str(generated), "horizon": None, "image_size": [8, 12]})
     assert ds2[0]["frames"].shape[-2:] == (8, 12)
+
+
+def test_action_spec_cannot_set_manifest_fields(prompt_dir: tuple[Path, Path], tmp_path: Path) -> None:
+    frames_dir, spec_path = prompt_dir
+    spec = json.loads(spec_path.read_text())
+    spec["prompts"][0]["branches"][0]["num_frames"] = 999
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(spec))
+    with pytest.raises(ValueError, match="written by the generator"):
+        g.load_action_spec(bad, frames_dir)
+    # Even a Branch built directly with a reserved extra cannot override the provenance fields.
+    prompts = g.load_action_spec(spec_path, frames_dir)
+    p = prompts[0]
+    b = g.Branch(p.branches[0].branch_id, p.branches[0].actions, "reach", {"num_frames": 999, "note": "x"})
+    frames = np.zeros((b.actions.shape[0] + 1, H, W, 3), np.uint8)
+    rec = g.write_rollout(tmp_path / "o", p, b, frames, 0, {}, write_mp4=False)
+    assert rec["num_frames"] == frames.shape[0] and rec["note"] == "x"
+    assert g.MANIFEST_FIELDS <= set(rec)
+
+
+def test_sanitised_sample_names_must_be_unique(tmp_path: Path) -> None:
+    gen = g.Cosmos3Generator(chunk_size=4, work_dir=tmp_path / "w", runner=FakeFrameworkRunner())
+    start = np.full((H, W, 3), 50, dtype=np.uint8)
+    jobs = [
+        g.RolloutJob("ep.1/b0", start, np.ones((4, A), np.float32), seed=1),
+        g.RolloutJob("ep_1/b0", start, np.ones((4, A), np.float32), seed=2),
+    ]
+    with pytest.raises(ValueError, match="collide"):
+        gen.generate_batch(jobs)
