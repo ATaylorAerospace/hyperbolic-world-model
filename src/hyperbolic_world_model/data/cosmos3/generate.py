@@ -330,10 +330,18 @@ class Cosmos3Generator:
         import subprocess
 
         samples_file = work_dir / "samples.jsonl"
-        samples_file.write_text("".join(json.dumps(s) + "\n" for s in samples))
+        samples_file.write_text("".join(json.dumps(s) + "\n" for s in samples), encoding="utf-8")
         out_dir = work_dir / "outputs"
         out_dir.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.run(self.framework_command(samples_file, out_dir), capture_output=True, text=True, check=False)
+        cmd = self.framework_command(samples_file, out_dir)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"cosmos_framework inference failed (interpreter not found: {cmd[0]}); "
+                f"is NVIDIA's cosmos-framework installed in {self.python or 'this interpreter'} "
+                "and is a GPU available?"
+            ) from exc
         if proc.returncode != 0:
             tail = proc.stderr[-2000:]
             raise RuntimeError(
@@ -470,8 +478,8 @@ def write_rollout(
         "embodiment": prompt.embodiment,
         "task": prompt.task,
         "primitive": branch.primitive,
-        "frames_path": str(frames_path.relative_to(out_root)),
-        "mp4_path": mp4_path and str(Path(mp4_path).relative_to(out_root)),
+        "frames_path": frames_path.relative_to(out_root).as_posix(),
+        "mp4_path": Path(mp4_path).relative_to(out_root).as_posix() if mp4_path else None,
         "latents_path": None,
         "num_frames": int(frames.shape[0]),
         "height": int(frames.shape[1]),

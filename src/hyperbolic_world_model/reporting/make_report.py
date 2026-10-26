@@ -67,7 +67,7 @@ def is_generated(path: Path) -> bool:
     """
     if path.suffix == ".md":
         try:
-            return HEADER in path.read_text()
+            return HEADER in path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return False
     return path.suffix == ".png" and "__" in path.name
@@ -108,7 +108,7 @@ def curve_x_column(df: pd.DataFrame) -> str | None:
 
 def _write_md(path: Path, title: str, body: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"# {title}\n\n{HEADER}\n\n{body}\n")
+    path.write_text(f"# {title}\n\n{HEADER}\n\n{body}\n", encoding="utf-8")
     return path
 
 
@@ -208,7 +208,7 @@ def make_report(outputs: Path, report: Path) -> list[Path]:
             f"{readme} was not written by make_report; refusing to overwrite it (is --report "
             "pointing at the right directory?)"
         )
-    readme.write_text("\n".join(index) + "\n")
+    readme.write_text("\n".join(index) + "\n", encoding="utf-8")
     written.append(readme)
     return written
 

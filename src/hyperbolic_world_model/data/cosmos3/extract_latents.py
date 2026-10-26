@@ -180,7 +180,7 @@ def extract_latents(root: Path, backend: TokenizerBackend, pooling: str = "mean"
         latent = backend.encode(frames)
         pooled = pool_latent(latent, pooling)
         path = save_latents(root, rec, pooled, pooling, backend.model_info)
-        rec["latents_path"] = str(path.relative_to(root))
+        rec["latents_path"] = path.relative_to(root).as_posix()
         rec["latent_shape"] = list(pooled.shape)
         written.append(path)
     rewrite_manifest(root, records)
