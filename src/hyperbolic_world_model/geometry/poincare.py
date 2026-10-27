@@ -9,6 +9,9 @@ Numerical notes (measured in ``tests/geometry/test_poincare.py``):
 
 * ``proj`` clips points to ``(1 - eps) * radius`` with ``eps = 4e-3`` in float32 and ``1e-5`` in
   float64 (:data:`~hyperbolic_world_model.geometry.utils.BOUNDARY_EPS`).
+* ``dist`` evaluates ``|-x (+) y|`` via the symmetric identity
+  ``|x - y| / sqrt((1 - k |x|^2)(1 - k |y|^2) + k |x - y|^2)`` (``k = -c > 0``) so ``d(x, y) == d(y, x)``
+  holds exactly in float32 without Möbius-addition subtraction cancellation near the boundary.
 * ``artanh`` is clamped at ``1 - 1e-7`` for every dtype, so float32 distances between points
   near the boundary saturate; the float32-vs-float64 test documents the resulting bound.
 """
@@ -19,9 +22,11 @@ import math
 
 import geoopt
 import torch
+from geoopt.manifolds.stereographic import math as _smath
 from torch import Tensor
 
 from hyperbolic_world_model.geometry.base import Manifold
+from hyperbolic_world_model.geometry.utils import min_norm
 
 
 class PoincareBall(Manifold):
@@ -33,10 +38,12 @@ class PoincareBall(Manifold):
         if c >= 0:
             raise ValueError(f"PoincareBall needs c < 0, got {c}")
         super().__init__(c=c)
+        self._k = -self.curvature
+        self._sqrt_k = math.sqrt(self._k)
         # float64 parameter: 0-dim tensors never promote dimensioned float32 inputs, but a float32
         # parameter would silently cap float64 accuracy at ~1e-7 for curvatures like -0.5.
-        self._g = geoopt.PoincareBall(c=torch.tensor(-self.curvature, dtype=torch.float64))
-        self.radius = 1.0 / math.sqrt(-self.curvature)
+        self._g = geoopt.PoincareBall(c=torch.tensor(self._k, dtype=torch.float64))
+        self.radius = 1.0 / self._sqrt_k
 
     @property
     def lambda0(self) -> float:
@@ -67,7 +74,16 @@ class PoincareBall(Manifold):
         return self._g.logmap(x, y)
 
     def dist(self, x: Tensor, y: Tensor) -> Tensor:
-        return self._g.dist(x, y, keepdim=False)
+        """Closed-form distance avoiding Möbius-addition asymmetry and boundary cancellation."""
+        diff = x - y
+        sqdist = (diff * diff).sum(dim=-1)
+        x2 = (x * x).sum(dim=-1)
+        y2 = (y * y).sum(dim=-1)
+        denom = ((1.0 - self._k * x2) * (1.0 - self._k * y2) + self._k * sqdist).clamp_min(
+            min_norm(x.dtype)
+        )
+        mobius_norm = diff.norm(dim=-1) / denom.sqrt()
+        return (2.0 / self._sqrt_k) * _smath.artanh(self._sqrt_k * mobius_norm)
 
     def proj(self, x: Tensor) -> Tensor:
         """Boundary clipping: points with ``|x| >= radius`` are pulled inside by ``eps``."""

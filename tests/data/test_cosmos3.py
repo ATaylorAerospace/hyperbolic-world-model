@@ -271,11 +271,14 @@ def test_cosmos3_generator_validation_and_command() -> None:
 
 
 def test_run_framework_without_the_package_raises_actionable_error(tmp_path: Path) -> None:
-    gen = g.Cosmos3Generator(work_dir=tmp_path, python=".venv/bin/python")
+    gen = g.Cosmos3Generator(work_dir=tmp_path)
     sample = gen.make_sample("s", tmp_path / "i.png", tmp_path / "a.json", 0, "")
     assert sample["model_mode"] == "forward_dynamics" and "num_steps" not in sample
     with pytest.raises(RuntimeError, match="cosmos_framework inference failed"):
         gen.run_framework([sample], tmp_path)
+    missing = g.Cosmos3Generator(work_dir=tmp_path, python=str(tmp_path / "no-such-python"))
+    with pytest.raises(RuntimeError, match="cosmos_framework inference failed"):
+        missing.run_framework([sample], tmp_path)
 
 
 @pytest.mark.skipif(g.ffmpeg_available(), reason="ffmpeg present; the no-ffmpeg paths are exercised elsewhere")
