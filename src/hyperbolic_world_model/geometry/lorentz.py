@@ -66,7 +66,8 @@ class Lorentz(Manifold):
         return self._g.logmap(x, y)
 
     def dist(self, x: Tensor, y: Tensor) -> Tensor:
-        return self._g.dist(x, y, keepdim=False)
+        # arcosh of a float32 inner product that rounds just below 1 comes out slightly negative.
+        return self._g.dist(x, y, keepdim=False).clamp_min(0.0)
 
     def proj(self, x: Tensor) -> Tensor:
         """Recompute the time-like coordinate so ``<x, x>_L = -k`` holds exactly."""

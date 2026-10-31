@@ -111,6 +111,9 @@ class LongHorizonConsistencyTask(Task):
         ib = torch.tensor([pos[b] for _, b in pairs])
         return frames, actions, ia, ib, h
 
+    def check_dataset(self, dataset: Dataset) -> None:
+        branch_pairs_of(dataset)
+
     @torch.no_grad()
     def run(self, bundle: ModelBundle, dataset: Dataset, device: str = "cpu") -> TaskResult:
         bundle.encoder.assert_frozen()

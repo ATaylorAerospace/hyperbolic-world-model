@@ -25,4 +25,4 @@ head:
                                    # 0.25 keeps embeddings ~2 units from the origin, inside the float32-safe region
   max_step: 5.0
   max_radius: 4.0                  # geodesic retraction guard shared by both heads (null to disable); capped at the ball's representable radius
-  seed: 0
+  seed: ${seed}                    # head init follows the experiment seed (same across geometries)

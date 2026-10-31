@@ -38,7 +38,10 @@ class ActionStats:
     def from_actions(cls, actions: Tensor, eps: float = 1e-6) -> ActionStats:
         """Compute stats over all leading dimensions of ``actions`` ``(..., action_dim)``."""
         flat = actions.reshape(-1, actions.shape[-1]).to(torch.float64)
-        return cls(mean=flat.mean(0).to(actions.dtype), std=flat.std(0).clamp_min(eps).to(actions.dtype))
+        mean = flat.mean(0)
+        # A single row has no sample std (NaN, which clamp_min leaves alone): use unit scale.
+        std = flat.std(0).clamp_min(eps) if flat.shape[0] > 1 else torch.ones_like(mean)
+        return cls(mean=mean.to(actions.dtype), std=std.to(actions.dtype))
 
 
 def normalise_actions(actions: Tensor, stats: ActionStats) -> Tensor:

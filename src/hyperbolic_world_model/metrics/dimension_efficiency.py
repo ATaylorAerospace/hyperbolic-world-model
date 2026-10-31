@@ -122,6 +122,10 @@ def area_under_curve(curve: DimensionCurve, log_dims: bool = True) -> float:
     y = np.asarray(curve.values, dtype=float)
     if len(x) < 2:
         raise ValueError("need at least two dimensions to compute an area")
+    finite = np.isfinite(y)  # a NaN dimension (a diverged seed, say) is skipped, not propagated
+    if finite.sum() < 2:
+        return float("nan")
+    x, y = x[finite], y[finite]
     # Trapezoid rule written out so it runs on NumPy 1.26 (no ``trapezoid``) and 2.x alike.
     return float(np.sum((y[1:] + y[:-1]) * np.diff(x) / 2.0))
 
@@ -153,15 +157,20 @@ def efficiency_table(
     rows = []
     for c in curves:
         vals = np.asarray(c.values, dtype=float)
-        best = int(np.argmin(vals) if lower_is_better else np.argmax(vals))
+        finite = np.isfinite(vals)
+        if finite.any():  # a NaN value (a diverged seed, say) is never the best one
+            best = int(np.nanargmin(vals) if lower_is_better else np.nanargmax(vals))
+            best_value, best_dim = float(vals[best]), int(c.dims[best])
+        else:
+            best_value, best_dim = float("nan"), int(c.dims[0])
         reach = None if threshold is None else dimension_to_reach(c, threshold, lower_is_better)
         rows.append(
             {
                 "label": c.geometry,
                 "n_dims": len(c.dims),
                 "auc_log2": area_under_curve(c) if len(c.dims) >= 2 else float("nan"),
-                "best_value": float(vals[best]),
-                "best_dim": int(c.dims[best]),
+                "best_value": best_value,
+                "best_dim": best_dim,
                 "dim_to_reach": float("nan") if reach is None else float(reach),
             }
         )

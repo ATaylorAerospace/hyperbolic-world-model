@@ -65,6 +65,11 @@ HIGHER_IS_BETTER: frozenset[str] = frozenset(
     }
 )
 
+#: Result metrics with no preferred direction: a branch divergence that is larger or smaller than
+#: the Euclidean one is neither better nor worse, so they get sweep tables and figures but no
+#: best-curvature or dimension-efficiency row.
+UNRANKED_METRICS: frozenset[str] = frozenset({"latent_divergence_h1", "latent_divergence_hmax"})
+
 #: Bookkeeping scalars that are not results and are left out of sweep tables and figures.
 COUNT_METRICS: frozenset[str] = frozenset(
     {
@@ -90,6 +95,11 @@ def lower_is_better(metric: str) -> bool:
 def is_result_metric(metric: str) -> bool:
     """Whether ``metric`` is a result (as opposed to a count) worth a table row or a figure."""
     return metric not in COUNT_METRICS and not metric.endswith("_std")
+
+
+def is_ranked_metric(metric: str) -> bool:
+    """Whether ``metric`` has a direction, so "best curvature" and "dimension to reach" make sense."""
+    return is_result_metric(metric) and metric not in UNRANKED_METRICS
 
 
 def collect_runs(outputs_root: Path) -> list[dict]:
@@ -167,7 +177,12 @@ def sweep_table(summary: pd.DataFrame, task: str, metric: str) -> pd.DataFrame:
             else:
                 n = int(cell["n_seeds"].sum())
                 mean = float((cell["mean"] * cell["n_seeds"]).sum() / n)
-                row[f"dim={d}"] = format_mean_std(mean, float(cell["std"].max()), n)
+                # Pooled std over every run behind the cell (within + between experiments), so
+                # two single-seed experiments with different values do not render as "± 0".
+                var = (
+                    cell["n_seeds"] * (cell["std"].fillna(0.0) ** 2 + (cell["mean"] - mean) ** 2)
+                ).sum() / n
+                row[f"dim={d}"] = format_mean_std(mean, float(var**0.5), n)
         rows.append(row)
     cols = ["model", "geometry", "curvature", *(f"dim={d}" for d in dims)]
     out = pd.DataFrame(rows, columns=cols)
@@ -211,8 +226,9 @@ def best_curvature_table(summary: pd.DataFrame, task: str, metric: str) -> pd.Da
 
 def _best_row(at_d: pd.DataFrame, model: str, task: str, metric: str, d: int, lower: bool) -> dict:
     """One row of :func:`best_curvature_table` for a single model and dimension."""
-    euc = at_d[at_d["geometry"] == "euclidean"]
-    hyp = at_d[at_d["geometry"] != "euclidean"]
+    # A configuration whose mean is NaN (an undefined correlation, say) is never "the best".
+    euc = at_d[(at_d["geometry"] == "euclidean") & at_d["mean"].notna()]
+    hyp = at_d[(at_d["geometry"] != "euclidean") & at_d["mean"].notna()]
     row: dict = {"model": model, "task": task, "metric": metric, "latent_dim": d}
     n_seeds = math.inf
     if not euc.empty:
@@ -274,7 +290,8 @@ def dimension_efficiency_table(summary: pd.DataFrame, task: str, metric: str) ->
         curves = curves_from_table(
             per_model, label_col="label", dim_col="latent_dim", value_col="mean"
         )
-        euc = per_model[per_model["geometry"] == "euclidean"].sort_values("latent_dim")
+        euc = per_model[(per_model["geometry"] == "euclidean") & per_model["mean"].notna()]
+        euc = euc.sort_values("latent_dim", kind="stable")
         threshold = float(euc["mean"].iloc[-1]) if not euc.empty else None
         out = efficiency_table(curves, threshold=threshold, lower_is_better=lower)
         out.insert(0, "metric", metric)
@@ -317,6 +334,7 @@ __all__ = [
     "collect_runs",
     "dimension_efficiency_table",
     "format_mean_std",
+    "is_ranked_metric",
     "is_result_metric",
     "lower_is_better",
     "results_table",

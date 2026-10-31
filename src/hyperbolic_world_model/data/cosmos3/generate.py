@@ -58,6 +58,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import logging
 import os
 import platform
 from collections.abc import Callable, Iterable
@@ -68,6 +69,8 @@ from typing import Any, Protocol
 import numpy as np
 
 from hyperbolic_world_model.data.cosmos3 import default_root
+
+log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Cosmos3-Nano"
 DEFAULT_DOMAIN = "droid_lerobot"
@@ -502,7 +505,10 @@ def _maybe_write_mp4(path: Path, frames: np.ndarray, fps: int) -> str | None:
     try:
         written = write_video_ffmpeg(path, frames, fps)
     except Exception:  # noqa: BLE001 - a broken encoder must not fail generation
-        return None
+        written = None
+    if written is None and ffmpeg_available():
+        # yuv420p needs even dimensions; a failed encode is otherwise invisible in the manifest.
+        log.warning("no mp4 preview for %s (ffmpeg failed; frames are %s)", path, frames.shape)
     return None if written is None else str(written)
 
 

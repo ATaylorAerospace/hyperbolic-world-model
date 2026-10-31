@@ -12,8 +12,10 @@ Numerical notes (measured in ``tests/geometry/test_poincare.py``):
 * ``dist`` evaluates ``|-x (+) y|`` via the symmetric identity
   ``|x - y| / sqrt((1 - k |x|^2)(1 - k |y|^2) + k |x - y|^2)`` (``k = -c > 0``) so ``d(x, y) == d(y, x)``
   holds exactly in float32 without Möbius-addition subtraction cancellation near the boundary.
-* ``artanh`` is clamped at ``1 - 1e-7`` for every dtype, so float32 distances between points
-  near the boundary saturate; the float32-vs-float64 test documents the resulting bound.
+* ``artanh`` is clamped at ``1 - 1e-7`` for every dtype, so distances between points near the
+  boundary saturate at ``(2 / sqrt(k)) * artanh(1 - 1e-7)`` (about 16.8 at ``c = -1``) in float64
+  as well as float32; :func:`~hyperbolic_world_model.geometry.utils.reliable_radius` is the
+  radius inside which this cannot happen. The float32-vs-float64 test documents the bound.
 """
 
 from __future__ import annotations

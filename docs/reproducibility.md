@@ -23,8 +23,10 @@ bash scripts/make_report.sh               # regenerates every table and figure f
 - `seed` in the experiment config seeds `torch` (CPU and CUDA) at the start of `run()`.
 - The synthetic dataset and synthetic encoder are seeded independently of the training seed so
   that changing `seed` changes only the head initialisation and data order.
-- The frozen projection inside every predictor head is seeded by `models.head.seed` so that the
-  Euclidean and hyperbolic heads see the *same* projected latents at the same seed.
+- The frozen projection and the initial weights inside every predictor head are seeded by
+  `models.head.seed`, which defaults to `${seed}`, so that the Euclidean and hyperbolic heads
+  see the *same* projected latents and start from the same weights at the same seed, and a
+  seed sweep varies the head initialisation as well as the data order.
 - Sweeps run `seed ∈ {0, 1, 2}`; tables report mean ± std over seeds.
 - Cosmos 3 generation is seeded per prompt; the seed is stored in `manifest.jsonl`.
 

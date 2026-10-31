@@ -226,6 +226,8 @@ def run(cfg: DictConfig) -> dict[str, Any]:
     tasks = build_tasks(cfg)
     train_ds = build_dataset(cfg.data, split="train")
     eval_ds = build_dataset(cfg.data, split="val")
+    for task in tasks:  # fail before training if the evaluation data cannot support a task
+        task.check_dataset(eval_ds)
     bundle = build_model(cfg, action_dim=int(train_ds.action_dim), device=device)
     train_subset = training_subset(train_ds, cfg.data.get("holdout_combinations"))
     history = train(bundle, train_subset, cfg, device)

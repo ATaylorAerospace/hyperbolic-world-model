@@ -212,3 +212,29 @@ def test_each_window_is_encoded_once_per_chunk() -> None:
     bundle.encoder.encode = counting  # type: ignore[method-assign]
     res = LongHorizonConsistencyTask(horizon=3, batch_size=100).run(bundle, ds)
     assert res.metrics["n_pairs"] == 20 and encoded["windows"] == len(ds) == 10
+
+
+def test_synthetic_branches_share_embodiment_and_task() -> None:
+    """Embodiment and task describe the scene (prompt-level); only the primitive varies per branch."""
+    from hyperbolic_world_model.data.splits import split_by_combination
+
+    spec = SyntheticSpec(n_episodes=32, horizon=2, n_branches=2, frame_shape=(1, 4, 4))
+    ds = SyntheticTrajectoryDataset(spec)
+    for idxs in ds.branches().values():
+        assert len({(ds.meta[i]["embodiment"], ds.meta[i]["task"]) for i in idxs}) == 1
+        assert len({ds.meta[i]["primitive"] for i in idxs}) == 2
+    assert {m["embodiment"] for m in ds.meta} == {"arm_a", "arm_b"}
+    assert len({m["task"] for m in ds.meta}) == 4
+    seen, held = split_by_combination(ds.meta, [["arm_b", "grasp"]])
+    assert len(held) == 8 and len(seen) == 24
+    # Every held-out episode is arm_b, and no seen episode is an arm_b grasp.
+    assert all(ds.meta[i]["embodiment"] == "arm_b" for i in held)
+    assert ("arm_b", "grasp") not in {
+        (ds.meta[i]["embodiment"], ds.meta[i]["primitive"]) for i in seen
+    }
+    # Unbranched data keeps the original per-episode labelling exactly.
+    plain = SyntheticTrajectoryDataset(
+        SyntheticSpec(n_episodes=16, horizon=2, frame_shape=(1, 4, 4))
+    )
+    assert [m["embodiment"] for m in plain.meta[:4]] == ["arm_a", "arm_b", "arm_a", "arm_b"]
+    assert plain.meta[9]["task"] == "task_0" and plain.meta[9]["primitive"] == "grasp"

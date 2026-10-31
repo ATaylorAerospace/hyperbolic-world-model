@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export HWM_DEVICE=cpu
-python -m hyperbolic_world_model.training.train_predictor experiments=smoke "$@"
+uv run --no-sync python -m hyperbolic_world_model.training.train_predictor experiments=smoke "$@"
 echo
 echo "smoke outputs:"
-find outputs/smoke -name metrics.json -exec sh -c 'echo "  $1"; python -c "import json,sys; d=json.load(open(sys.argv[1])); print(\"   \", d[\"geometry\"], \"K=\", d[\"curvature\"], d[\"tasks\"][\"latent_rollout\"][\"metrics\"])" "$1"' _ {} \;
+find outputs/smoke -name metrics.json -exec sh -c 'echo "  $1"; uv run --no-sync python -c "import json,sys; d=json.load(open(sys.argv[1])); print(\"   \", d[\"geometry\"], \"K=\", d[\"curvature\"], d[\"tasks\"][\"latent_rollout\"][\"metrics\"])" "$1"' _ {} \;

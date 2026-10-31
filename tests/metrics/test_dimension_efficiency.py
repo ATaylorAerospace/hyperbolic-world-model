@@ -103,3 +103,24 @@ def test_efficiency_table_summarises_every_curve() -> None:
     assert poi["dim_to_reach"] < euc["dim_to_reach"] and poi["auc_log2"] < euc["auc_log2"]
     single = efficiency_table([DimensionCurve("one", (8,), (0.4,))])
     assert np.isnan(single["auc_log2"].iloc[0]) and np.isnan(single["dim_to_reach"].iloc[0])
+
+
+def test_efficiency_table_never_picks_a_nan_as_best() -> None:
+    nan = float("nan")
+    curve = DimensionCurve("poincare", (4, 8, 16), (nan, 0.5, 0.2))
+    row = efficiency_table([curve], threshold=0.3).iloc[0]
+    assert row["best_value"] == 0.2 and row["best_dim"] == 16 and row["dim_to_reach"] == 16
+    row = efficiency_table([curve], lower_is_better=False).iloc[0]
+    assert row["best_value"] == 0.5 and row["best_dim"] == 8
+    allnan = efficiency_table([DimensionCurve("x", (4, 8), (nan, nan))]).iloc[0]
+    assert np.isnan(allnan["best_value"]) and allnan["best_dim"] == 4
+
+
+def test_area_under_curve_skips_nan_dimensions() -> None:
+    full = DimensionCurve("g", (4, 8, 16), (1.0, 0.5, 0.25))
+    holed = DimensionCurve("g", (4, 8, 16), (1.0, float("nan"), 0.25))
+    assert area_under_curve(holed) == pytest.approx(
+        area_under_curve(DimensionCurve("g", (4, 16), (1.0, 0.25)))
+    )
+    assert area_under_curve(full) != area_under_curve(holed)
+    assert np.isnan(area_under_curve(DimensionCurve("g", (4, 8), (float("nan"), 1.0))))

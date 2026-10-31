@@ -7,14 +7,14 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
 [![geoopt](https://img.shields.io/badge/geoopt-0.5%2B-6f42c1)](https://github.com/geoopt/geoopt)
-[![Tests](https://img.shields.io/badge/tests-482%20passing-brightgreen)](#-verification)
+[![Tests](https://img.shields.io/badge/tests-493%20passing-brightgreen)](#-verification)
 [![Curvature: Swept](https://img.shields.io/badge/Curvature-Swept-orange)](docs/methodology.md)
 
 **A research harness that retrains the action conditioned predictor head of a frozen video world model (V-JEPA 2-AC, with DINO-WM as a lightweight second subject) in Euclidean, Poincaré and Lorentz latent spaces, and measures whether negative curvature buys better rollouts, hierarchy recovery and dimension efficiency, with every distance computed in the geometry of the model that produced it and curvature always swept.**
 
 **Author: A Taylor**
 
-> 🚧 **Status:** Geometry primitives stable · four metrics and four tasks implemented · one-command report · V-JEPA 2-AC head training · 482/482 tests passing.
+> 🚧 **Status:** Geometry primitives stable · four metrics and four tasks implemented · one-command report · V-JEPA 2-AC head training · 493/493 tests passing.
 
 ---
 
@@ -343,19 +343,19 @@ uv run pytest -q
 
 ```text
 =========================== short test summary info ============================
-SKIPPED [1] tests/data/test_cosmos3.py:289: needs ffmpeg
-482 passed, 1 skipped in 33.04s
+SKIPPED [1] tests/data/test_cosmos3.py:284: ffmpeg present; the no-ffmpeg paths are exercised elsewhere
+493 passed, 1 skipped in 62.40s (0:01:02)
 ```
 
 | Suite | Tests | What it exercises |
 |---|---|---|
-| `tests/geometry` | 282 | the `Manifold` contract over Euclidean, Poincaré and Lorentz at every swept curvature, float32 and float64 |
-| `tests/tasks` | 72 | the task base (batched embedding, Fréchet mean, Spearman) and all four tasks in every geometry |
+| `tests/geometry` | 283 | the `Manifold` contract over Euclidean, Poincaré and Lorentz at every swept curvature, float32 and float64 |
+| `tests/tasks` | 73 | the task base (batched embedding, Fréchet mean, Spearman) and all four tasks in every geometry |
 | `tests/models` | 47 | both predictor heads and the V-JEPA 2-AC loader (with fakes, no download) |
-| `tests/metrics` | 35 | geodesic error (Manifold-only, checked on the AST), Gromov δ, distortion and mAP, dimension efficiency |
-| `tests/data` | 23 | the Cosmos 3 generation, latent extraction and dataset pipeline (all with fakes) and the shared held-out split |
-| `tests/reporting` | 14 | every table and figure of the one-command report, byte-identical on rerun |
-| `tests/test_smoke_experiment.py` | 10 | the end-to-end smoke experiment in all three geometries and with all four tasks |
+| `tests/metrics` | 37 | geodesic error (Manifold-only, checked on the AST), Gromov δ, distortion and mAP, dimension efficiency |
+| `tests/data` | 25 | the Cosmos 3 generation, latent extraction and dataset pipeline (all with fakes) and the shared held-out split |
+| `tests/reporting` | 17 | every table and figure of the one-command report, byte-identical on rerun |
+| `tests/test_smoke_experiment.py` | 12 | the end-to-end smoke experiment in all three geometries and with all four tasks |
 
 The summary above is the output of a real run; the per-suite counts come from `pytest --collect-only`.
 
