@@ -195,3 +195,13 @@ def test_float32_vs_float64_at_the_image_of_0999_radius(c: float) -> None:
     near = random_points(m, 16, 4, torch.float64, max_dist=4.0)
     near2 = random_points(m, 16, 4, torch.float64, max_dist=4.0)
     assert torch.all(m.dist(m.expmap(near, m.logmap(near, near2)), near2) < 1e-5)
+
+
+def test_float32_self_distance_is_never_negative() -> None:
+    """``arcosh`` of an inner product that rounds just below 1 used to give ``-0.008``."""
+    m = Lorentz(c=-1.0)
+    v = torch.randn(2000, 4, generator=torch.Generator().manual_seed(0))  # |v| up to ~5
+    x = m.expmap0(m.tangent0_from_euclidean(v))
+    self_dist = m.dist(x, x)
+    assert torch.all(self_dist >= 0) and float(self_dist.max()) < 0.1
+    assert torch.all(m.sqdist(x, x) >= 0)

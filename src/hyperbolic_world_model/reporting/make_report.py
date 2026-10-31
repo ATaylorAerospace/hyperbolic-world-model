@@ -50,6 +50,7 @@ from hyperbolic_world_model.reporting.tables import (
     best_curvature_table,
     collect_runs,
     dimension_efficiency_table,
+    is_ranked_metric,
     is_result_metric,
     results_table,
     summary_table,
@@ -156,8 +157,10 @@ def make_report(outputs: Path, report: Path) -> list[Path]:
                 written.append(
                     plot_dimension_curves(grp, metric, figs_dir / f"{stem}__vs_dimension.png")
                 )
-                eff_rows.append(dimension_efficiency_table(per_model, task, metric))
-            best_rows.append(best_curvature_table(per_model, task, metric))
+                if is_ranked_metric(metric):
+                    eff_rows.append(dimension_efficiency_table(per_model, task, metric))
+            if is_ranked_metric(metric):
+                best_rows.append(best_curvature_table(per_model, task, metric))
     best = (
         pd.concat(best_rows, ignore_index=True)
         if best_rows

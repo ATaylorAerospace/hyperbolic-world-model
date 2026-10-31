@@ -133,3 +133,47 @@ def test_to_markdown_formatting() -> None:
     assert lines[2] == "| 8 | 0.1235 | yes | a |"
     assert lines[3] == "|  | 1.0000 | no |  |"
     assert to_markdown(pd.DataFrame()) == "_(no runs found)_"
+
+
+def test_best_row_never_picks_a_nan_configuration(summary: pd.DataFrame) -> None:
+    """A NaN mean (an undefined correlation, say) sorts last, which used to win higher-is-better."""
+    s = summary.copy()
+    nan_cfg = (s["task"] == "hierarchy_reconstruction") & (s["metric"] == "map")
+    nan_cfg &= (s["geometry"] == "poincare") & (s["curvature"] == -0.5)
+    s.loc[nan_cfg, "mean"] = math.nan
+    best = best_curvature_table(s, "hierarchy_reconstruction", "map")
+    assert (best["best_curvature"] == -1.0).all() and best["best_mean"].notna().all()
+    # If every hyperbolic mean is NaN there is no best row, not a NaN one.
+    s.loc[(s["task"] == "hierarchy_reconstruction") & (s["geometry"] != "euclidean"), "mean"] = (
+        math.nan
+    )
+    none = best_curvature_table(s, "hierarchy_reconstruction", "map")
+    assert (none["best_geometry"] == "").all() and not none["exceeds_one_std"].any()
+
+
+def test_sweep_table_pools_the_spread_across_experiments() -> None:
+    """Two single-seed experiments at one configuration are not reported as ``± 0``."""
+    base = {
+        "model": "m", "geometry": "poincare", "curvature": -1.0, "latent_dim": 8,
+        "task": "t", "metric": "err",
+    }  # fmt: skip
+    s = pd.DataFrame(
+        [
+            {**base, "experiment": "e1", "mean": 1.0, "std": 0.0, "n_seeds": 1},
+            {**base, "experiment": "e2", "mean": 3.0, "std": 0.0, "n_seeds": 1},
+        ]
+    )
+    cell = sweep_table(s, "t", "err")["dim=8"].iloc[0]
+    assert cell == "2.0000 ± 1.0000"
+    # With within-experiment spread the pooled std combines both components.
+    s["std"] = [0.5, 0.5]
+    assert sweep_table(s, "t", "err")["dim=8"].iloc[0] == f"2.0000 ± {(1.25) ** 0.5:.4f}"
+
+
+def test_unranked_metrics_get_no_best_or_efficiency_row() -> None:
+    from hyperbolic_world_model.reporting.tables import UNRANKED_METRICS, is_ranked_metric
+
+    assert UNRANKED_METRICS == {"latent_divergence_h1", "latent_divergence_hmax"}
+    assert all(is_result_metric(m) and not is_ranked_metric(m) for m in UNRANKED_METRICS)
+    assert is_ranked_metric("map") and is_ranked_metric("geodesic_error_hmax")
+    assert not is_ranked_metric("n_items") and not is_ranked_metric("map_std")

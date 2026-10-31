@@ -16,4 +16,4 @@ head:
   embed_scale: 1.0
   max_step: 5.0
   max_radius: 4.0
-  seed: 0
+  seed: ${seed}                    # head init follows the experiment seed (same across geometries)

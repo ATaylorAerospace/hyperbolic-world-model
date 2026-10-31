@@ -162,3 +162,32 @@ def test_config_dir_resolves_from_a_checkout_or_the_wheel(tmp_path: Path) -> Non
     (pkg / "configs" / "config.yaml").unlink()
     with pytest.raises(FileNotFoundError, match="no Hydra config directory"):
         resolve_config_dir(module)
+
+
+def test_experiment_seed_changes_the_head_initialisation(tmp_path: Path) -> None:
+    """A seed sweep must vary the head init, not just the data order (same across geometries)."""
+    from hyperbolic_world_model.models.registry import build_model
+
+    def head_state(seed: int, geometry: str) -> dict:
+        cfg = _compose(tmp_path / f"{geometry}{seed}", f"seed={seed}", f"geometry={geometry}")
+        assert int(cfg.models.head.seed) == seed
+        return {
+            k: v.clone() for k, v in build_model(cfg, action_dim=3).predictor.state_dict().items()
+        }
+
+    s0, s1 = head_state(0, "poincare"), head_state(1, "poincare")
+    assert any(not torch.equal(s0[k], s1[k]) for k in s0)
+    assert not torch.equal(s0["projection"], s1["projection"])
+    # The same seed gives the same projection and initial weights in the other geometries.
+    for geometry in ("euclidean", "lorentz"):
+        other = head_state(0, geometry)
+        assert torch.equal(other["projection"], s0["projection"])
+        assert all(torch.equal(other[k], s0[k]) for k in s0 if k != "projection")
+
+
+def test_tasks_are_checked_against_the_data_before_training(tmp_path: Path) -> None:
+    """``long_horizon_consistency`` on unbranched data fails in the constructor path, not after epochs."""
+    cfg = _compose(tmp_path, "tasks=long_horizon_consistency", "training.epochs=50")
+    with pytest.raises(ValueError, match="no branch pairs"):
+        run(cfg)
+    assert not (tmp_path / "metrics.json").exists()

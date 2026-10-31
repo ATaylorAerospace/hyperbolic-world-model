@@ -291,11 +291,25 @@ def test_video_helpers_without_ffmpeg(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(not g.ffmpeg_available(), reason="needs ffmpeg")
 def test_video_helpers_round_trip_with_ffmpeg(tmp_path: Path) -> None:
-    frames = np.random.default_rng(0).integers(0, 255, size=(9, H, W, 3), dtype=np.uint8)
+    """Structured frames survive the lossy mp4 round trip with the right shape and channel order.
+
+    White noise would not: 4:2:0 chroma subsampling averages colour over 2x2 blocks, which costs
+    ~45/255 per pixel on noise whatever the quality setting, so the fixture is a moving gradient.
+    """
+    yy, xx = np.mgrid[0:H, 0:W]
+    frames = np.stack(
+        [
+            np.stack([(xx * 8 + 10 * t) % 256, yy * 8, (xx + yy) * 4], axis=-1).astype(np.uint8)
+            for t in range(9)
+        ]
+    )
     path = g.write_video_ffmpeg(tmp_path / "x.mp4", frames, 5)
     assert path is not None and path.exists()
     back = g.read_video_ffmpeg(path)
-    assert back.shape == frames.shape and np.abs(back.astype(int) - frames.astype(int)).mean() < 12  # lossy
+    assert back.shape == frames.shape
+    err = np.abs(back.astype(int) - frames.astype(int)).mean()
+    swapped = np.abs(back[..., ::-1].astype(int) - frames.astype(int)).mean()
+    assert err < 8 < swapped  # lossy but close, and RGB (not BGR) on both sides of the pipe
 
 
 def test_generate_rollouts_uses_the_batch_path(prompt_dir: tuple[Path, Path], tmp_path: Path) -> None:
@@ -470,3 +484,41 @@ def test_sanitised_sample_names_must_be_unique(tmp_path: Path) -> None:
     ]
     with pytest.raises(ValueError, match="collide"):
         gen.generate_batch(jobs)
+
+
+def test_whole_rollout_horizon_is_shared_across_splits_and_empty_splits_warn(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``horizon=None`` truncates to the shortest rollout in the manifest, not in the split."""
+    from hyperbolic_world_model.data.cosmos3.extract_latents import rewrite_manifest
+    from tests.tasks.helpers import write_cosmos_fixture
+
+    root = write_cosmos_fixture(tmp_path / "gen", n_prompts=6, n_branches=1, n_frames=9, size=8)
+    records = g.read_manifest(root)
+    for i, rec in enumerate(records):  # ep0 is the shortest rollout; it lands in one split only
+        rec["num_frames"] = 5 + i
+        d = root / rec["frames_path"]
+        data = np.load(d)
+        np.savez_compressed(
+            d, frames=data["frames"][: 5 + i], actions=data["actions"][: 4 + i]
+        )
+    rewrite_manifest(root, records)
+    horizons = {
+        s: Cosmos3TrajectoryDataset(root, horizon=None, split=s).effective_horizon
+        for s in ("train", "val", "test", "all")
+    }
+    assert set(horizons.values()) == {4}
+    with caplog.at_level("WARNING"):
+        empty = Cosmos3TrajectoryDataset(root, horizon=None, split_fractions=(0.0, 0.0), split="val")
+    assert len(empty) == 0 and "split='val' is empty" in caplog.text
+
+
+def test_action_stats_with_a_single_row_have_unit_scale() -> None:
+    from hyperbolic_world_model.data.droid import ActionStats, normalise_actions
+
+    one = torch.tensor([[1.0, -2.0, 3.0]])
+    stats = ActionStats.from_actions(one)
+    assert torch.equal(stats.mean, one[0]) and torch.equal(stats.std, torch.ones(3))
+    assert torch.equal(normalise_actions(one, stats), torch.zeros(1, 3))
+    many = torch.randn(16, 3)
+    assert torch.isfinite(ActionStats.from_actions(many).std).all()

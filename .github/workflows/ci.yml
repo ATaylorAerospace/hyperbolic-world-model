@@ -32,7 +32,7 @@ jobs:
         run: uvx ruff format --check .
 
   test:
-    name: pytest (geometry, metrics, tasks, reporting; CPU)
+    name: pytest (geometry, metrics, data, models, tasks, reporting; CPU)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

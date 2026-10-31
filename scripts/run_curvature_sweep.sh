@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 [ -f .env ] && set -a && source .env && set +a
 WHICH="${1:-both}"; shift || true
 
-run() { uv run --no-sync python -m hyperbolic_world_model.training.train_predictor "experiments=$1" --multirun "$@"; }
+run() { local exp="$1"; shift; uv run --no-sync python -m hyperbolic_world_model.training.train_predictor "experiments=$exp" --multirun "$@"; }
 case "$WHICH" in
   poincare) run poincare_sweep "$@" ;;
   lorentz)  run lorentz_sweep "$@" ;;

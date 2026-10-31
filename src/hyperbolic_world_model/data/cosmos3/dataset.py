@@ -22,6 +22,7 @@ What the two tasks need is exposed directly:
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -37,6 +38,8 @@ from torch.utils.data import Dataset
 from hyperbolic_world_model.data.cosmos3 import default_root
 from hyperbolic_world_model.data.cosmos3.generate import read_manifest
 from hyperbolic_world_model.data.splits import COMBINATION_KEYS, split_by_combination
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,10 +89,17 @@ class Cosmos3TrajectoryDataset(Dataset):
         self._cache: dict[int, tuple[Tensor, Tensor]] = {}
 
         keep = self._split_indices(split, split_fractions)
+        if not keep:
+            log.warning(
+                "Cosmos3TrajectoryDataset split=%r is empty under %s (%d rollouts in the manifest; "
+                "the split is a hash of prompt_id, so tiny datasets can lose a split entirely)",
+                split, self.root, len(self.records),
+            )
         if horizon is None:
-            # Whole rollouts, truncated to the shortest one so every item (and batch) stacks.
-            lengths = [int(self.records[i]["num_frames"]) for i in keep]
-            self.effective_horizon = (min(lengths) - 1) if lengths else 0
+            # Whole rollouts, truncated to the shortest one in the *manifest* (not the split), so
+            # every item and batch stacks and train/val/test items all have the same horizon.
+            lengths = [int(r["num_frames"]) for r in self.records]
+            self.effective_horizon = min(lengths) - 1
         else:
             self.effective_horizon = int(horizon)
         h = self.effective_horizon

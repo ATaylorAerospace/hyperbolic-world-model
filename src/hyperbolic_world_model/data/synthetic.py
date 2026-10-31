@@ -73,15 +73,20 @@ class SyntheticTrajectoryDataset(Dataset):
         self.states: Tensor = st
         emb = ["arm_a", "arm_b"]
         prim = ["reach", "grasp"]
+        # Embodiment and task describe the scene, so they are prompt-level and shared by every
+        # branch of a prompt (as in the Cosmos data); only the primitive varies per branch.
+        # Otherwise a held-out (embodiment, task) combination could share its start frame and
+        # hidden state with a sibling branch in the seen set.
         self.meta = [
             {
-                "embodiment": emb[i % 2],
-                "task": f"task_{(i // 2) % 4}",
-                "primitive": prim[(i // 8) % 2],
-                "prompt_id": f"p{i // spec.n_branches}",
-                "branch_id": f"b{i % spec.n_branches}",
+                "embodiment": emb[p % 2],
+                "task": f"task_{(p // 2) % 4}",
+                "primitive": prim[(p // 8 + b) % 2],
+                "prompt_id": f"p{p}",
+                "branch_id": f"b{b}",
             }
             for i in range(spec.n_episodes)
+            for p, b in [divmod(i, spec.n_branches)]
         ]
 
     def branches(self) -> dict[str, list[int]]:

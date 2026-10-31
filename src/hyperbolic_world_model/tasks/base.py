@@ -97,6 +97,14 @@ class Task(ABC):
     def run(self, bundle: ModelBundle, dataset: Dataset, device: str = "cpu") -> TaskResult:
         """Evaluate and return metrics in the bundle's native geometry."""
 
+    def check_dataset(self, dataset: Dataset) -> None:
+        """Raise early if ``dataset`` cannot support this task (called before training starts).
+
+        The default accepts anything; tasks with requirements (branch pairs, say) override it so
+        a sweep fails in seconds rather than after every epoch has run.
+        """
+        return None  # deliberately a no-op hook, not an abstract method
+
     def result(self, bundle: ModelBundle, **metrics: float) -> TaskResult:
         """Helper stamping the geometry and curvature onto a result."""
         return TaskResult(
